@@ -344,6 +344,7 @@ void D_Display (void)
 	I_UpdateNoBlit ();
 	M_Drawer ();                            // menu is drawn even on top of wipes
 	I_FinishUpdate ();                      // page flip or blit buffer
+	I_UpdateSound ();                       // keep music playing through it
     } while (!done);
 }
 

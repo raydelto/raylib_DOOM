@@ -334,14 +334,6 @@ void I_SetSfxVolume(int volume)
   snd_SfxVolume = volume;
 }
 
-// MUSIC API - dummy. Some code from DOS version.
-void I_SetMusicVolume(int volume)
-{
-  // Internal state variable.
-  snd_MusicVolume = volume;
-  // Now set volume on output device.
-  // Whatever( snd_MusciVolume );
-}
 
 
 //
@@ -497,14 +489,22 @@ static void I_MixSound( void )
 //
 void I_UpdateSound( void )
 {
+    int		needed;
+
     if (!sound_ready)
 	return;
 
-    while (RL_AudioQueued() < MIXAHEAD)
+    // Measured once, so a device that drains faster than real
+    // time can't keep us here.
+    needed = MIXAHEAD - RL_AudioQueued(RL_SFX);
+    while (needed > 0)
     {
 	I_MixSound ();
-	RL_QueueAudio (mixbuffer, SAMPLECOUNT);
+	RL_QueueAudio (RL_SFX, mixbuffer, SAMPLECOUNT);
+	needed -= SAMPLECOUNT;
     }
+
+    I_UpdateMusic ();
 }
 
 
@@ -611,7 +611,7 @@ I_InitSound()
     return;
   }
 
-  if (!RL_InitAudio (SAMPLERATE))
+  if (!RL_InitAudio () || !RL_OpenStream (RL_SFX, SAMPLERATE))
   {
     fprintf(stderr, " could not open audio device\n");
     return;
@@ -622,68 +622,6 @@ I_InitSound()
   
   // Finished initialization.
   fprintf(stderr, "I_InitSound: sound module ready\n");
-}
 
-
-
-
-//
-// MUSIC API.
-// Still no music done.
-// Remains. Dummies.
-//
-void I_InitMusic(void)		{ }
-void I_ShutdownMusic(void)	{ }
-
-static int	looping=0;
-static int	musicdies=-1;
-
-void I_PlaySong(int handle, int looping)
-{
-  // UNUSED.
-  handle = looping = 0;
-  musicdies = gametic + TICRATE*30;
-}
-
-void I_PauseSong (int handle)
-{
-  // UNUSED.
-  handle = 0;
-}
-
-void I_ResumeSong (int handle)
-{
-  // UNUSED.
-  handle = 0;
-}
-
-void I_StopSong(int handle)
-{
-  // UNUSED.
-  handle = 0;
-
-  looping = 0;
-  musicdies = 0;
-}
-
-void I_UnRegisterSong(int handle)
-{
-  // UNUSED.
-  handle = 0;
-}
-
-int I_RegisterSong(void* data)
-{
-  // UNUSED.
-  data = NULL;
-
-  return 1;
-}
-
-// Is the song playing?
-int I_QrySongPlaying(int handle)
-{
-  // UNUSED.
-  handle = 0;
-  return looping || musicdies > gametic;
+  I_InitMusic ();
 }

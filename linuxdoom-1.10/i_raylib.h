@@ -76,14 +76,25 @@ void RL_SetMouseGrab (int grab);
 // Audio
 //
 
-// Starts a stereo 16-bit output stream. Returns 0 if no audio device.
-int RL_InitAudio (int samplerate);
+// Output streams, each with its own sample rate.
+enum
+{
+    RL_SFX,
+    RL_MUSIC,
+    RL_NUMSTREAMS
+};
+
+// Opens the audio device. Returns 0 if there is none.
+int RL_InitAudio (void);
 void RL_ShutdownAudio (void);
 
-// Frames queued but not yet played.
-int RL_AudioQueued (void);
+// Starts a stereo 16-bit stream. Returns 0 on failure.
+int RL_OpenStream (int stream, int samplerate);
 
-// Appends interleaved stereo frames to the output queue.
-void RL_QueueAudio (const short* samples, int frames);
+// Frames queued but not yet played.
+int RL_AudioQueued (int stream);
+
+// Appends interleaved stereo frames to the stream's queue.
+void RL_QueueAudio (int stream, const short* samples, int frames);
 
 #endif

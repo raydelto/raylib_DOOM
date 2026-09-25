@@ -6,7 +6,8 @@ systems. The original release notes are in [README.TXT](README.TXT).
 
 The software renderer is untouched: it still draws 8-bit paletted pixels
 into a 320x200 buffer. raylib opens the window, shows that buffer scaled
-to 4:3, reads the keyboard and mouse, and plays the sound effects.
+to 4:3, reads the keyboard and mouse, and plays the sound effects and
+music.
 
 ## Building
 
@@ -55,6 +56,7 @@ An IWAD passed with `-file` (`-file DOOM1.WAD`) is also used as the IWAD.
 | `-scale N`           | Any window multiple                       |
 | `-fullscreen`        | Start borderless fullscreen               |
 | `-nosound`           | No audio device                           |
+| `-nomusic`           | Sound effects only                        |
 | `-iwad FILE`         | Use FILE as the IWAD                      |
 | `-warp E M` / `-warp M`, `-skill N`, `-loadgame N` | As in the original |
 
@@ -72,6 +74,14 @@ to `~/.doomrc`.
 - `i_sound.c`: the original software mixer, now feeding a raylib audio
   stream instead of `/dev/dsp`. Sounds stop, update and report
   "playing" by handle, and play at their own sample rate.
+- `i_music.c`: new. Plays the music the way DOS DOOM did on an AdLib or
+  Sound Blaster: the MUS score drives an emulated OPL2 FM chip, with the
+  instruments from the IWAD's `GENMIDI` lump and DMX's voice allocation,
+  pitch table and volume curve. The title uses `D_INTROA`, the OPL
+  arrangement, like the DOS version.
+- `opl3.c` / `opl3.h`: [Nuked OPL3](https://github.com/nukeykt/Nuked-OPL3)
+  1.8 by Nuke.YKT, unmodified, under the LGPL 2.1 or later
+  (`opl3-LICENSE.txt`).
 - `doomkeys.h`: the key codes, split out of `doomdef.h`.
 - 64-bit fixes: pointer arrays sized with `sizeof` instead of `4`,
   pointer/integer casts through `intptr_t`, the on-disk texture struct
@@ -81,5 +91,3 @@ to `~/.doomrc`.
   buffers, the unterminated sprite name list, undefined event queue
   increments, and a `memset` that cleared only part of the mouse and
   joystick button state.
-
-Music is not implemented, same as in the original Linux release.

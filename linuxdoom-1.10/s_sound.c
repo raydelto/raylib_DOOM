@@ -170,7 +170,7 @@ void S_Init
   I_SetChannels();
   
   S_SetSfxVolume(sfxVolume);
-  // No music with Linux - another dummy.
+  // Music volume, for the OPL music in i_music.c.
   S_SetMusicVolume(musicVolume);
 
   // Allocating the internal channels for mixing
@@ -653,6 +653,12 @@ S_ChangeMusic
 {
     musicinfo_t*	music;
     char		namebuf[9];
+
+    // The IWADs carry two title songs: d_intro, and d_introa
+    // arranged for the OPL chip, which DOS DOOM played on AdLib
+    // and Sound Blaster cards. The music here is OPL, so use it.
+    if (musicnum == mus_intro && W_CheckNumForName("d_introa") >= 0)
+	musicnum = mus_introa;
 
     if ( (musicnum <= mus_None)
 	 || (musicnum >= NUMMUSIC) )
