@@ -30,6 +30,9 @@ rcsid[] = "$Id: m_bbox.c,v 1.1 1997/02/03 22:45:10 b1 Exp $";
 
 #include <stdarg.h>
 #include <sys/time.h>
+#ifdef __APPLE__
+#include <time.h>
+#endif
 #include <unistd.h>
 
 #include "doomdef.h"
@@ -86,6 +89,22 @@ byte* I_ZoneBase (int*	size)
 // I_GetTime
 // returns time in 1/70th second tics
 //
+#ifdef __APPLE__
+// macOS steps the wall clock back by up to tens of milliseconds
+// several times a minute. Time going backwards makes the screen
+// wipe's tic count negative and hangs it, so use the monotonic
+// clock instead of gettimeofday.
+int  I_GetTime (void)
+{
+    struct timespec	tp;
+    static time_t	basetime=0;
+
+    clock_gettime(CLOCK_MONOTONIC, &tp);
+    if (!basetime)
+	basetime = tp.tv_sec;
+    return (int)((tp.tv_sec-basetime)*TICRATE + tp.tv_nsec/1000*TICRATE/1000000);
+}
+#else
 int  I_GetTime (void)
 {
     struct timeval	tp;
@@ -99,6 +118,7 @@ int  I_GetTime (void)
     newtics = (tp.tv_sec-basetime)*TICRATE + tp.tv_usec*TICRATE/1000000;
     return newtics;
 }
+#endif
 
 
 
