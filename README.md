@@ -64,6 +64,11 @@ Alt+Enter toggles fullscreen. The mouse is captured while you are playing
 and released in menus, when paused, and during demos. Settings are saved
 to `~/.doomrc`.
 
+Under WSL (WSLg) GLFW cannot lock the pointer, so the game detects WSL at
+run time and starts a small `powershell.exe` helper that keeps the Windows
+pointer inside the window while you play. Set `DOOM_WSL_MOUSE=0` to turn
+that off, or `DOOM_WSL_MOUSE=1` to force it.
+
 ## What changed
 
 - `i_raylib.c` / `i_raylib.h`: new, the only code that talks to raylib.
