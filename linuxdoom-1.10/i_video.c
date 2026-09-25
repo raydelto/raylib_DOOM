@@ -239,6 +239,4 @@ void I_InitGraphics(void)
 
     RL_InitVideo (SCREENWIDTH, SCREENHEIGHT, scale,
 		  M_CheckParm("-fullscreen") != 0);
-
-    screens[0] = (unsigned char *) malloc (SCREENWIDTH * SCREENHEIGHT);
 }
