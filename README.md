@@ -78,9 +78,14 @@ An IWAD passed with `-file` (`-file DOOM1.WAD`) is also used as the IWAD.
 
 The picture is scaled to the window in two steps, first by a whole
 number with sharp pixels and then smoothly to the final size, so every
-pixel row comes out the same height. Alt+Enter toggles fullscreen. The mouse is captured while you are playing
-and released in menus, when paused, and during demos. Settings are saved
-to `~/.doomrc`.
+pixel row comes out the same height. Alt+Enter toggles fullscreen. The
+mouse is captured while you are playing and released in menus, when
+paused, and during demos. Settings are saved to `~/.doomrc`.
+
+Under WSL (WSLg) GLFW cannot lock the pointer, so the game detects WSL at
+run time and starts a small `powershell.exe` helper that keeps the Windows
+pointer inside the window while you play. Set `DOOM_WSL_MOUSE=0` to turn
+that off, or `DOOM_WSL_MOUSE=1` to force it.
 
 ## What changed
 
