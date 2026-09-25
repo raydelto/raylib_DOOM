@@ -17,6 +17,10 @@
 //	the MUS score drives an emulated OPL2 FM chip (Nuked OPL3,
 //	in OPL2 mode), with instruments from the IWAD's GENMIDI lump.
 //
+//	Standard MIDI files (as in Freedoom and many PWADs) are
+//	sequenced here too, and drive the same voices as MUS: MIDI
+//	events are translated to the MUS events they correspond to.
+//
 //	How DMX, DOOM's sound library, drove the chip (its frequency
 //	table, volume curve and voice allocation) follows Chocolate
 //	Doom's i_oplmusic.c, Copyright (C) 2005-2014 Simon Howard,
@@ -44,6 +48,10 @@
 
 #define OPL_RATE		49716	// the chip's native rate, Hz
 #define MUS_TICRATE		140	// MUS score ticks per second
+
+#define MIDI_MAXTRACKS		64
+#define MIDI_PERCUSSION		9	// MIDI channel 10
+#define MIDI_DEFAULT_TEMPO	500000	// microseconds per quarter note
 
 #define NUM_VOICES		9	// OPL2 melodic channels
 #define NUM_CHANNELS		16	// MUS channels
@@ -313,6 +321,24 @@ static int		music_volume = 120;
 static const byte*	song;
 static int		songlength;
 static int		scorestart;
+static boolean		songmidi;	// Standard MIDI file, not MUS
+
+// A Standard MIDI file track being read.
+typedef struct
+{
+    const byte*	start;		// first event
+    const byte*	end;
+    const byte*	pos;
+    int		ticks_left;	// MIDI ticks until the next event
+    int		status;		// running status
+    boolean	done;
+} miditrack_t;
+
+static miditrack_t	miditracks[MIDI_MAXTRACKS];
+static int		nummiditracks;
+static int		mididivision;	// ticks per quarter note
+static int		miditempo;	// microseconds per quarter note
+static double		midiwait;	// samples until the next event
 
 // Playback state.
 static boolean		playing;
@@ -853,6 +879,351 @@ static void ProcessEvents (void)
 
 
 //
+// Standard MIDI files
+//
+// Every track is read at once, each keeping the MIDI ticks until its
+// next event. The events are passed to the MUS handlers above, with
+// MIDI channels moved to MUS channels: MIDI percussion (channel 10)
+// is MUS channel 15, and the channels above it move down one.
+//
+
+static int MIDI_ReadVarLen (miditrack_t* t)
+{
+    int		value = 0;
+    int		i;
+    int		c;
+
+    // At most four bytes.
+    for (i = 0; i < 4; i++)
+    {
+	if (t->pos >= t->end)
+	    return -1;
+	c = *t->pos++;
+	value = (value << 7) | (c & 0x7f);
+	if (!(c & 0x80))
+	    return value;
+    }
+    return -1;
+}
+
+
+static int MIDI_Channel (int channel)
+{
+    if (channel == MIDI_PERCUSSION)
+	return PERCUSSION_CHANNEL;
+    if (channel > MIDI_PERCUSSION)
+	return channel - 1;
+    return channel;
+}
+
+
+static void MIDI_Controller (int channel, int ctrl, int value)
+{
+    switch (ctrl)
+    {
+      case 7:	// channel volume
+	SetChannelVolume (channel, value);
+	break;
+
+      case 120:	// all sound off
+	SystemEvent (channel, mus_ctrl_soundsoff);
+	break;
+
+      case 123:	// all notes off
+	SystemEvent (channel, mus_ctrl_notesoff);
+	break;
+
+      default:
+	// Panning is lost on a mono OPL2, and DMX ignored the rest.
+	break;
+    }
+}
+
+
+//
+// MIDI_TrackEvent
+// Plays one event of a track. False at the end of the track.
+//
+static boolean MIDI_TrackEvent (miditrack_t* t)
+{
+    int		status;
+    int		channel;
+    int		data1;
+    int		data2;
+    int		type;
+    int		length;
+
+    if (t->pos >= t->end)
+	return false;
+
+    status = *t->pos;
+    if (status & 0x80)
+	t->pos++;
+    else if (t->status)
+	status = t->status;	// running status: data byte comes first
+    else
+	return false;
+
+    // System exclusive: skipped.
+    if (status == 0xf0 || status == 0xf7)
+    {
+	t->status = 0;
+	length = MIDI_ReadVarLen (t);
+	if (length < 0 || length > t->end - t->pos)
+	    return false;
+	t->pos += length;
+	return true;
+    }
+
+    // Meta events: only the tempo and the end of the track matter.
+    if (status == 0xff)
+    {
+	t->status = 0;
+	if (t->pos >= t->end)
+	    return false;
+	type = *t->pos++;
+	length = MIDI_ReadVarLen (t);
+	if (length < 0 || length > t->end - t->pos)
+	    return false;
+	if (type == 0x2f)
+	    return false;
+	if (type == 0x51 && length == 3)
+	{
+	    miditempo = (t->pos[0] << 16) | (t->pos[1] << 8) | t->pos[2];
+	    if (miditempo <= 0)
+		miditempo = MIDI_DEFAULT_TEMPO;
+	}
+	t->pos += length;
+	return true;
+    }
+
+    // No other system messages belong in a file.
+    if (status >= 0xf0)
+	return false;
+
+    t->status = status;
+    channel = MIDI_Channel (status & 0x0f);
+
+    if (t->pos >= t->end)
+	return false;
+    data1 = *t->pos++ & 0x7f;
+
+    // Program change and channel pressure have one data byte.
+    switch (status & 0xf0)
+    {
+      case 0xc0:
+	channels[channel].instrument = data1;
+	return true;
+
+      case 0xd0:
+	return true;
+    }
+
+    if (t->pos >= t->end)
+	return false;
+    data2 = *t->pos++ & 0x7f;
+
+    switch (status & 0xf0)
+    {
+      case 0x80:
+	KeyOff (channel, data1);
+	break;
+
+      case 0x90:
+	// Velocity 0 is a key release; KeyOn handles it.
+	KeyOn (channel, data1, data2);
+	break;
+
+      case 0xb0:
+	MIDI_Controller (channel, data1, data2);
+	break;
+
+      case 0xe0:
+	// 14 bits, where MUS has 8.
+	PitchWheel (channel, ((data2 << 7) | data1) >> 6);
+	break;
+
+      default:
+	// Key pressure.
+	break;
+    }
+
+    return true;
+}
+
+
+static void MIDI_ReadDelta (miditrack_t* t)
+{
+    int		delta = MIDI_ReadVarLen (t);
+
+    if (delta < 0)
+	t->done = true;
+    else
+	t->ticks_left = delta;
+}
+
+
+static void MIDI_Restart (void)
+{
+    int		i;
+
+    for (i = 0; i < nummiditracks; i++)
+    {
+	miditracks[i].pos = miditracks[i].start;
+	miditracks[i].status = 0;
+	miditracks[i].done = false;
+	MIDI_ReadDelta (&miditracks[i]);
+    }
+
+    miditempo = MIDI_DEFAULT_TEMPO;
+    midiwait = 0;
+}
+
+
+//
+// MIDI_ProcessEvents
+// Plays every event that is due, then works out the wait until
+// the next one.
+//
+static void MIDI_ProcessEvents (void)
+{
+    miditrack_t*	t;
+    int			i;
+    int			delta;
+
+    while (playing && midiwait < 1)
+    {
+	// Tracks are played in order, so a tempo change in the first
+	// track applies to notes at the same time in the others.
+	for (i = 0; i < nummiditracks; i++)
+	{
+	    t = &miditracks[i];
+	    while (!t->done && t->ticks_left == 0)
+	    {
+		if (MIDI_TrackEvent (t))
+		    MIDI_ReadDelta (t);
+		else
+		    t->done = true;
+	    }
+	}
+
+	// The nearest event of any track.
+	delta = -1;
+	for (i = 0; i < nummiditracks; i++)
+	{
+	    t = &miditracks[i];
+	    if (!t->done && (delta < 0 || t->ticks_left < delta))
+		delta = t->ticks_left;
+	}
+
+	if (delta < 0)
+	{
+	    // Every track has ended.
+	    AllVoicesOff ();
+	    if (looping)
+	    {
+		MIDI_Restart ();
+		ResetChannels ();
+		// Don't spin on a song that has no delays at all.
+		midiwait += 1;
+	    }
+	    else
+		playing = false;
+	    continue;
+	}
+
+	for (i = 0; i < nummiditracks; i++)
+	    if (!miditracks[i].done)
+		miditracks[i].ticks_left -= delta;
+
+	midiwait += (double) delta * miditempo * OPL_RATE
+		    / ((double) mididivision * 1000000);
+    }
+}
+
+
+//
+// MIDI_GenerateMusic
+//
+static void MIDI_GenerateMusic (short* buffer, int frames)
+{
+    int		n;
+
+    while (frames > 0)
+    {
+	n = frames;
+
+	if (playing && !songpaused)
+	{
+	    MIDI_ProcessEvents ();
+	    if (playing && midiwait < n)
+		n = (int) midiwait;
+	}
+
+	OPL3_GenerateStream (&opl, buffer, n);
+	buffer += n*2;
+	frames -= n;
+
+	if (playing && !songpaused)
+	    midiwait -= n;
+    }
+}
+
+
+//
+// MIDI_Register
+// Finds the tracks of a Standard MIDI file. False if it isn't one
+// that can be played.
+//
+static boolean MIDI_Register (const byte* data, int length)
+{
+    const byte*	p = data;
+    const byte*	end = data + length;
+    int		headerlength;
+    int		chunklength;
+    int		division;
+
+    if (length < 14 || memcmp (p, "MThd", 4))
+	return false;
+
+    headerlength = (p[4] << 24) | (p[5] << 16) | (p[6] << 8) | p[7];
+    division = (p[12] << 8) | p[13];
+
+    // SMPTE timing is not used by music lumps.
+    if (headerlength < 6 || headerlength > length - 8
+	|| division == 0 || (division & 0x8000))
+	return false;
+
+    p += 8 + headerlength;
+    nummiditracks = 0;
+
+    // Format 0 has one track, format 1 plays its tracks together.
+    // Unknown chunks are skipped.
+    while (end - p >= 8 && nummiditracks < MIDI_MAXTRACKS)
+    {
+	chunklength = (p[4] << 24) | (p[5] << 16) | (p[6] << 8) | p[7];
+	if (chunklength < 0 || chunklength > end - p - 8)
+	    chunklength = end - p - 8;	// truncated: play what is there
+
+	if (!memcmp (p, "MTrk", 4))
+	{
+	    miditracks[nummiditracks].start = p + 8;
+	    miditracks[nummiditracks].end = p + 8 + chunklength;
+	    nummiditracks++;
+	}
+
+	p += 8 + chunklength;
+    }
+
+    if (nummiditracks == 0)
+	return false;
+
+    mididivision = division;
+    return true;
+}
+
+
+//
 // GenerateMusic
 // Produces frames of music, advancing the score in real time.
 //
@@ -860,6 +1231,12 @@ static void GenerateMusic (short* buffer, int frames)
 {
     int		n;
     int		ticksamples;
+
+    if (songmidi)
+    {
+	MIDI_GenerateMusic (buffer, frames);
+	return;
+    }
 
     while (frames > 0)
     {
@@ -1008,15 +1385,32 @@ void I_ResumeSong (int handle)
 
 //
 // I_RegisterSong
-// Takes a MUS lump. Anything else registers, but stays silent.
+// Takes a MUS lump or a Standard MIDI file, told apart by their
+// headers. Anything else registers, but stays silent.
 //
-int I_RegisterSong (void* data)
+int I_RegisterSong (void* data, int length)
 {
     const byte*	mus = (const byte *) data;
 
     song = NULL;
+    songmidi = false;
 
-    if (!music_ready || !mus || memcmp (mus, "MUS\x1a", 4))
+    if (!music_ready || !mus || length < 4)
+	return 1;
+
+    if (!memcmp (mus, "MThd", 4))
+    {
+	if (MIDI_Register (mus, length))
+	{
+	    songmidi = true;
+	    song = mus;
+	}
+	else
+	    fprintf (stderr, "I_RegisterSong: unplayable MIDI file\n");
+	return 1;
+    }
+
+    if (length < 8 || memcmp (mus, "MUS\x1a", 4))
 	return 1;
 
     songlength = (unsigned short) SHORT(*(short *)(mus + 4));
@@ -1038,6 +1432,8 @@ void I_PlaySong (int handle, int loop)
 
     scorepos = scorestart;
     ticks_to_event = 0;
+    if (songmidi)
+	MIDI_Restart ();
     looping = loop;
     songpaused = false;
     playing = true;
