@@ -31,6 +31,22 @@ cd linuxdoom-1.10
 make
 ```
 
+### Windows
+
+Build with MinGW-w64 GCC, for example from
+[w64devkit](https://github.com/skeeto/w64devkit) or MSYS2:
+
+```sh
+cmake -B build -G "MinGW Makefiles"
+cmake --build build -j
+```
+
+or cross-compile from Linux with a MinGW-w64 toolchain file
+(`CMAKE_SYSTEM_NAME Windows`, `CMAKE_C_COMPILER x86_64-w64-mingw32-gcc`).
+MSVC is not supported: the code uses C11 atomics and POSIX headers such
+as `<unistd.h>` and `<dirent.h>`, which MinGW provides and MSVC does not.
+Settings go to `%USERPROFILE%\.doomrc` when `HOME` is not set.
+
 ## Running
 
 Put an IWAD (`doom1.wad`, `doom.wad`, `doom2.wad`, `plutonia.wad`,
@@ -60,9 +76,11 @@ An IWAD passed with `-file` (`-file DOOM1.WAD`) is also used as the IWAD.
 | `-iwad FILE`         | Use FILE as the IWAD                      |
 | `-warp E M` / `-warp M`, `-skill N`, `-loadgame N` | As in the original |
 
-Alt+Enter toggles fullscreen. The mouse is captured while you are playing
-and released in menus, when paused, and during demos. Settings are saved
-to `~/.doomrc`.
+The picture is scaled to the window in two steps, first by a whole
+number with sharp pixels and then smoothly to the final size, so every
+pixel row comes out the same height. Alt+Enter toggles fullscreen. The
+mouse is captured while you are playing and released in menus, when
+paused, and during demos. Settings are saved to `~/.doomrc`.
 
 Under WSL (WSLg) GLFW cannot lock the pointer, so the game detects WSL at
 run time and starts a small `powershell.exe` helper that keeps the Windows

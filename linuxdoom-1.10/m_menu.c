@@ -30,6 +30,10 @@ rcsid[] = "$Id: m_menu.c,v 1.7 1997/02/03 22:45:10 b1 Exp $";
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <stdlib.h>
+
+#ifndef O_BINARY
+#define O_BINARY	0
+#endif
 #include <ctype.h>
 
 
@@ -522,7 +526,7 @@ void M_ReadSaveStrings(void)
 	else
 	    sprintf(name,SAVEGAMENAME"%d.dsg",i);
 
-	handle = open (name, O_RDONLY | 0, 0666);
+	handle = open (name, O_RDONLY | O_BINARY, 0666);
 	if (handle == -1)
 	{
 	    strcpy(&savegamestrings[i][0],EMPTYSTRING);
