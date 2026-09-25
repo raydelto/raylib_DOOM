@@ -39,8 +39,15 @@ Put an IWAD (`doom1.wad`, `doom.wad`, `doom2.wad`, `plutonia.wad`,
 ./build/raylibdoom
 ```
 
-[Freedoom](https://freedoom.github.io/) works too: copy or link
-`freedoom2.wad` as `doom2.wad`.
+Upper- or mixed-case names such as `DOOM1.WAD` are found too. To use an
+IWAD under any other name or path, name it with `-iwad`; the game is
+identified from the maps it contains:
+
+```sh
+./build/raylibdoom -iwad ~/wads/freedoom2.wad
+```
+
+An IWAD passed with `-file` (`-file DOOM1.WAD`) is also used as the IWAD.
 
 | Option               | Effect                                    |
 | -------------------- | ----------------------------------------- |
@@ -48,6 +55,7 @@ Put an IWAD (`doom1.wad`, `doom.wad`, `doom2.wad`, `plutonia.wad`,
 | `-scale N`           | Any window multiple                       |
 | `-fullscreen`        | Start borderless fullscreen               |
 | `-nosound`           | No audio device                           |
+| `-iwad FILE`         | Use FILE as the IWAD                      |
 | `-warp E M` / `-warp M`, `-skill N`, `-loadgame N` | As in the original |
 
 Alt+Enter toggles fullscreen. The mouse is captured while you are playing
