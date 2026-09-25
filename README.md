@@ -60,7 +60,9 @@ An IWAD passed with `-file` (`-file DOOM1.WAD`) is also used as the IWAD.
 | `-iwad FILE`         | Use FILE as the IWAD                      |
 | `-warp E M` / `-warp M`, `-skill N`, `-loadgame N` | As in the original |
 
-Alt+Enter toggles fullscreen. The mouse is captured while you are playing
+The picture is scaled to the window in two steps, first by a whole
+number with sharp pixels and then smoothly to the final size, so every
+pixel row comes out the same height. Alt+Enter toggles fullscreen. The mouse is captured while you are playing
 and released in menus, when paused, and during demos. Settings are saved
 to `~/.doomrc`.
 

@@ -18,6 +18,7 @@
 //
 //-----------------------------------------------------------------------------
 
+#include <math.h>
 #include <stdatomic.h>
 #include <string.h>
 
@@ -44,6 +45,14 @@ static void QuietRaylib (void)
 static Texture2D	screentex;
 static int		screenwidth;
 static int		screenheight;
+
+// The frame blown up by a whole number with nearest filtering, then
+// smoothly scaled to the window. Straight nearest scaling to 4:3
+// gives rows of uneven height (200 lines onto 720 is 3.6 each).
+static RenderTexture2D	prescaled;
+static int		prescale;
+
+#define MAXPRESCALE	8
 
 
 void RL_InitVideo (int width, int height, int scale, int fullscreen)
@@ -76,6 +85,8 @@ void RL_ShutdownVideo (void)
     if (!IsWindowReady ())
 	return;
 
+    if (prescale)
+	UnloadRenderTexture (prescaled);
     UnloadTexture (screentex);
     CloseWindow ();
 }
@@ -87,7 +98,9 @@ void RL_Present (const unsigned char* rgba)
     float	winh;
     float	w;
     float	h;
+    int		n;
     Rectangle	src;
+    Rectangle	big;
     Rectangle	dst;
 
     UpdateTexture (screentex, rgba);
@@ -103,12 +116,39 @@ void RL_Present (const unsigned char* rgba)
 	w = h * 4.0f / 3.0f;
     }
 
+    // Smallest whole factor at least as big as the output, so the
+    // smooth pass only ever shrinks, which keeps edges sharp.
+    n = (int)ceilf (h / screenheight);
+    if (n < (int)ceilf (w / screenwidth))
+	n = (int)ceilf (w / screenwidth);
+    if (n < 1)
+	n = 1;
+    if (n > MAXPRESCALE)
+	n = MAXPRESCALE;
+
+    if (n != prescale)
+    {
+	if (prescale)
+	    UnloadRenderTexture (prescaled);
+	prescaled = LoadRenderTexture (screenwidth*n, screenheight*n);
+	SetTextureFilter (prescaled.texture, TEXTURE_FILTER_BILINEAR);
+	prescale = n;
+    }
+
     src = (Rectangle) { 0, 0, (float)screenwidth, (float)screenheight };
+    big = (Rectangle) { 0, 0, (float)(screenwidth*n), (float)(screenheight*n) };
+
+    BeginTextureMode (prescaled);
+    DrawTexturePro (screentex, src, big, (Vector2) { 0, 0 }, 0.0f, WHITE);
+    EndTextureMode ();
+
+    // Render textures are stored upside down.
+    big.height = -big.height;
     dst = (Rectangle) { (winw - w) / 2, (winh - h) / 2, w, h };
 
     BeginDrawing ();
     ClearBackground (BLACK);
-    DrawTexturePro (screentex, src, dst, (Vector2) { 0, 0 }, 0.0f, WHITE);
+    DrawTexturePro (prescaled.texture, big, dst, (Vector2) { 0, 0 }, 0.0f, WHITE);
     EndDrawing ();
 }
 
@@ -134,6 +174,10 @@ static int		eventtail;
 
 // Last key state we reported to DOOM, indexed by raylib key code.
 static unsigned char	keystate[512];
+
+// Keys whose press we kept from DOOM (Alt+Enter), so their
+// release is kept from it too.
+static unsigned char	swallowed[512];
 
 static int		mousegrabbed;
 static int		mousebuttons;
@@ -205,6 +249,13 @@ static void SetKeyState (int key, int down)
 	return;
 
     keystate[key] = down;
+
+    if (!down && swallowed[key])
+    {
+	swallowed[key] = 0;
+	return;
+    }
+
     doomkey = TranslateKey (key);
     if (doomkey)
 	PostEvent (down ? rl_keydown : rl_keyup, doomkey, 0, 0);
@@ -232,6 +283,7 @@ static void DrainPressedKeys (void)
 	    // Alt+Enter toggles fullscreen, and is not passed on.
 	    ToggleBorderlessWindowed ();
 	    keystate[key] = 1;
+	    swallowed[key] = 1;
 	    continue;
 	}
 
