@@ -31,6 +31,13 @@ cd linuxdoom-1.10
 make
 ```
 
+### macOS
+
+Install the Xcode Command Line Tools (`xcode-select --install`) and
+CMake (`brew install cmake`), then build as above. raylib uses Cocoa
+and OpenGL, which ship with macOS; nothing else is needed. Works on
+Apple Silicon and Intel.
+
 ### Windows
 
 Build with MinGW-w64 GCC, for example from

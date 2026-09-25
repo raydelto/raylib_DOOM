@@ -165,10 +165,22 @@ void RL_Present (const unsigned char* rgba)
 }
 
 
+#ifdef __APPLE__
+// raylib only reports a close request until the next poll, and
+// EndDrawing polls before RL_PumpEvents polls again, so a close
+// request (Cmd+Q, the close button) that arrives during EndDrawing
+// is lost. RL_PumpEvents latches it here first.
+static int		quitrequested;
+#endif
+
 int RL_QuitRequested (void)
 {
     // WindowShouldClose is true when there is no window, and
     // netgames poll input while arbitrating, before one opens.
+#ifdef __APPLE__
+    if (quitrequested)
+	return 1;
+#endif
     return IsWindowReady () && WindowShouldClose ();
 }
 
@@ -321,6 +333,11 @@ void RL_PumpEvents (void)
 
     if (!IsWindowReady ())
 	return;
+
+#ifdef __APPLE__
+    if (WindowShouldClose ())
+	quitrequested = 1;
+#endif
 
     // EndDrawing polls too and resets the pressed queue,
     // so grab what it collected before polling again.
