@@ -38,6 +38,8 @@ static const char rcsid[] = "$Id: d_main.c,v 1.8 1997/02/03 22:45:09 b1 Exp $";
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <dirent.h>
+#include <strings.h>
 #endif
 
 
@@ -50,6 +52,7 @@ static const char rcsid[] = "$Id: d_main.c,v 1.8 1997/02/03 22:45:09 b1 Exp $";
 
 #include "z_zone.h"
 #include "w_wad.h"
+#include "m_swap.h"
 #include "s_sound.h"
 #include "v_video.h"
 
@@ -556,15 +559,128 @@ void D_AddFile (char *file)
 
 //
 // WadPath
-// Returns a malloc'ed "dir/name".
+// Returns a malloc'ed "dir/name". If there is no file by that
+// exact name, but one differing only in case (DOOM1.WAD, as it
+// comes off DOS media), returns that one instead.
 //
 static char* WadPath (char* dir, char* name)
 {
-    char*	path;
+    char*		path;
+    DIR*		d;
+    struct dirent*	ent;
 
     path = malloc (strlen(dir) + 1 + strlen(name) + 1);
     sprintf (path, "%s/%s", dir, name);
+
+    if (!access (path, R_OK))
+	return path;
+
+    d = opendir (dir);
+    if (!d)
+	return path;
+
+    while ((ent = readdir (d)) != NULL)
+    {
+	if (!strcasecmp (ent->d_name, name))
+	{
+	    // Same length as name, so it fits.
+	    sprintf (path, "%s/%s", dir, ent->d_name);
+	    break;
+	}
+    }
+
+    closedir (d);
     return path;
+}
+
+
+//
+// GameModeOfWad
+// Tells the game from the maps an IWAD contains,
+// indetermined if the file is not an IWAD.
+//
+static GameMode_t GameModeOfWad (char* path)
+{
+    FILE*		f;
+    wadinfo_t		header;
+    filelump_t		lump;
+    int			i;
+    int			numlumps;
+    boolean		map01 = false;
+    boolean		e1m1 = false;
+    boolean		e3m1 = false;
+    boolean		e4m1 = false;
+
+    f = fopen (path, "rb");
+    if (!f)
+	return indetermined;
+
+    if (fread (&header, sizeof(header), 1, f) != 1
+	|| strncmp (header.identification, "IWAD", 4)
+	|| fseek (f, LONG(header.infotableofs), SEEK_SET))
+    {
+	fclose (f);
+	return indetermined;
+    }
+
+    numlumps = LONG(header.numlumps);
+    for (i = 0; i < numlumps; i++)
+    {
+	if (fread (&lump, sizeof(lump), 1, f) != 1)
+	    break;
+	if (!strncasecmp (lump.name, "MAP01", 8))
+	    map01 = true;
+	else if (!strncasecmp (lump.name, "E1M1", 8))
+	    e1m1 = true;
+	else if (!strncasecmp (lump.name, "E3M1", 8))
+	    e3m1 = true;
+	else if (!strncasecmp (lump.name, "E4M1", 8))
+	    e4m1 = true;
+    }
+    fclose (f);
+
+    if (map01)
+	return commercial;
+    if (e4m1)
+	return retail;
+    if (e3m1)
+	return registered;
+    if (e1m1)
+	return shareware;
+    return indetermined;
+}
+
+
+//
+// SameFile
+// True if both paths name the same file.
+//
+static boolean SameFile (char* a, char* b)
+{
+    struct stat	sa;
+    struct stat	sb;
+
+    if (!a || !b || stat (a, &sa) || stat (b, &sb))
+	return false;
+    return sa.st_dev == sb.st_dev && sa.st_ino == sb.st_ino;
+}
+
+
+//
+// UseIWAD
+// Loads path as the IWAD, telling the game from its contents.
+//
+static boolean UseIWAD (char* path)
+{
+    GameMode_t	mode;
+
+    mode = GameModeOfWad (path);
+    if (mode == indetermined)
+	return false;
+
+    gamemode = mode;
+    D_AddFile (path);
+    return true;
 }
 
 
@@ -585,6 +701,8 @@ void IdentifyVersion (void)
     char*	doom2fwad;
     char*	plutoniawad;
     char*	tntwad;
+
+    int		p;
 
 #ifdef NORMALUNIX
     char *home;
@@ -618,6 +736,16 @@ void IdentifyVersion (void)
       I_Error("Please set $HOME to your home directory");
     sprintf(basedefault, "%s/.doomrc", home);
 #endif
+
+    p = M_CheckParm ("-iwad");
+    if (p && p < myargc-1)
+    {
+	if (access (myargv[p+1], R_OK))
+	    I_Error ("-iwad: can't read %s", myargv[p+1]);
+	if (!UseIWAD (myargv[p+1]))
+	    I_Error ("-iwad: %s is not an IWAD", myargv[p+1]);
+	return;
+    }
 
     if (M_CheckParm ("-shdev"))
     {
@@ -713,7 +841,18 @@ void IdentifyVersion (void)
       return;
     }
 
-    printf("Game mode indeterminate.\n");
+    // An IWAD given with -file, as in "doom -file DOOM1.WAD".
+    p = M_CheckParm ("-file");
+    if (p)
+    {
+	while (++p != myargc && myargv[p][0] != '-')
+	    if (UseIWAD (myargv[p]))
+		return;
+    }
+
+    printf("Game mode indeterminate: no IWAD (doom1.wad, doom.wad, doom2.wad,\n"
+	   "plutonia.wad, tnt.wad...) found in %s.\n"
+	   "Put one there, or set DOOMWADDIR to its directory.\n", doomwaddir);
     gamemode = indetermined;
 
     // We don't abort. Let's see what the PWAD contains.
@@ -945,9 +1084,14 @@ void D_DoomMain (void)
     {
 	// the parms after p are wadfile/lump names,
 	// until end of parms or another - preceded parm
-	modifiedgame = true;            // homebrew levels
 	while (++p != myargc && myargv[p][0] != '-')
+	{
+	    // Already loaded as the IWAD.
+	    if (SameFile (myargv[p], wadfiles[0]))
+		continue;
+	    modifiedgame = true;            // homebrew levels
 	    D_AddFile (myargv[p]);
+	}
     }
 
     p = M_CheckParm ("-playdemo");
