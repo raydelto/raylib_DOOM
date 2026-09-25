@@ -115,7 +115,9 @@ void RL_Present (const unsigned char* rgba)
 
 int RL_QuitRequested (void)
 {
-    return WindowShouldClose ();
+    // WindowShouldClose is true when there is no window, and
+    // netgames poll input while arbitrating, before one opens.
+    return IsWindowReady () && WindowShouldClose ();
 }
 
 
