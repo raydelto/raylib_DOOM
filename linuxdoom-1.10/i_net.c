@@ -27,13 +27,25 @@ rcsid[] = "$Id: m_bbox.c,v 1.1 1997/02/03 22:45:10 b1 Exp $";
 #include <string.h>
 #include <stdio.h>
 
+#include <errno.h>
+
+#ifdef _WIN32
+// Lean, or windows.h brings rpcndr.h and its own "boolean".
+#define WIN32_LEAN_AND_MEAN
+#include <winsock2.h>
+#define ioctl			ioctlsocket
+#define SocketError()		WSAGetLastError ()
+#define SOCKET_WOULDBLOCK	WSAEWOULDBLOCK
+#else
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include <errno.h>
 #include <unistd.h>
 #include <netdb.h>
 #include <sys/ioctl.h>
+#define SocketError()		errno
+#define SOCKET_WOULDBLOCK	EWOULDBLOCK
+#endif
 
 #include "i_system.h"
 #include "d_event.h"
@@ -52,6 +64,10 @@ rcsid[] = "$Id: m_bbox.c,v 1.1 1997/02/03 22:45:10 b1 Exp $";
 
 
 // For some odd reason...
+#undef ntohl
+#undef ntohs
+#undef htonl
+#undef htons
 #define ntohl(x) \
         ((unsigned long int)((((unsigned long int)(x) & 0x000000ffU) << 24) | \
                              (((unsigned long int)(x) & 0x0000ff00U) <<  8) | \
@@ -70,8 +86,29 @@ boolean NetListen (void);
 
 
 //
+// SocketErrorText
+// Why the last socket call failed.
+//
+static const char* SocketErrorText (void)
+{
+#ifdef _WIN32
+    static char	text[32];
+
+    sprintf (text, "Winsock error %d", WSAGetLastError ());
+    return text;
+#else
+    return strerror (errno);
+#endif
+}
+
+
+//
 // NETWORKING
 //
+
+#ifndef IPPORT_USERRESERVED
+#define IPPORT_USERRESERVED	5000	// not in Winsock
+#endif
 
 int	DOOMPORT =	(IPPORT_USERRESERVED +0x1d );
 
@@ -94,7 +131,7 @@ int UDPsocket (void)
     // allocate a socket
     s = socket (PF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (s<0)
-	I_Error ("can't create socket: %s",strerror(errno));
+	I_Error ("can't create socket: %s", SocketErrorText ());
 		
     return s;
 }
@@ -117,7 +154,7 @@ BindToLocalPort
 			
     v = bind (s, (void *)&address, sizeof(address));
     if (v == -1)
-	I_Error ("BindToPort: bind: %s", strerror(errno));
+	I_Error ("BindToPort: bind: %s", SocketErrorText ());
 }
 
 
@@ -146,7 +183,7 @@ void PacketSend (void)
     }
 		
     //printf ("sending %i\n",gametic);		
-    c = sendto (sendsocket , &sw, doomcom->datalength
+    c = sendto (sendsocket , (char *)&sw, doomcom->datalength
 		,0,(void *)&sendaddress[doomcom->remotenode]
 		,sizeof(sendaddress[doomcom->remotenode]));
 	
@@ -167,12 +204,12 @@ void PacketGet (void)
     doomdata_t		sw;
 				
     fromlen = sizeof(fromaddress);
-    c = recvfrom (insocket, &sw, sizeof(sw), 0
+    c = recvfrom (insocket, (char *)&sw, sizeof(sw), 0
 		  , (struct sockaddr *)&fromaddress, &fromlen );
     if (c == -1 )
     {
-	if (errno != EWOULDBLOCK)
-	    I_Error ("GetPacket: %s",strerror(errno));
+	if (SocketError () != SOCKET_WOULDBLOCK)
+	    I_Error ("GetPacket: %s", SocketErrorText ());
 	doomcom->remotenode = -1;		// no packet
 	return;
     }
@@ -228,7 +265,7 @@ int GetLocalAddress (void)
     // get local address
     v = gethostname (hostname, sizeof(hostname));
     if (v == -1)
-	I_Error ("GetLocalAddress : gethostname: errno %d",errno);
+	I_Error ("GetLocalAddress : gethostname: %s", SocketErrorText ());
 	
     hostentry = gethostbyname (hostname);
     if (!hostentry)
@@ -294,6 +331,16 @@ void I_InitNetwork (void)
     netget = PacketGet;
     netgame = true;
 
+    // Before any Winsock call, host lookups included.
+#ifdef _WIN32
+    {
+	WSADATA	wsadata;
+
+	if (WSAStartup (MAKEWORD(2, 2), &wsadata))
+	    I_Error ("I_InitNetwork: WSAStartup failed");
+    }
+#endif
+
     // parse player number and host list
     doomcom->consoleplayer = myargv[i+1][0]-'1';
 
@@ -326,7 +373,14 @@ void I_InitNetwork (void)
     // build message to receive
     insocket = UDPsocket ();
     BindToLocalPort (insocket,htons(DOOMPORT));
+#ifdef _WIN32
+    {
+	u_long	nonblocking = 1;
+	ioctl (insocket, FIONBIO, &nonblocking);
+    }
+#else
     ioctl (insocket, FIONBIO, &trueval);
+#endif
 
     sendsocket = UDPsocket ();
 }

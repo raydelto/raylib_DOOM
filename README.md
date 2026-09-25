@@ -31,6 +31,22 @@ cd linuxdoom-1.10
 make
 ```
 
+### Windows
+
+Build with MinGW-w64 GCC, for example from
+[w64devkit](https://github.com/skeeto/w64devkit) or MSYS2:
+
+```sh
+cmake -B build -G "MinGW Makefiles"
+cmake --build build -j
+```
+
+or cross-compile from Linux with a MinGW-w64 toolchain file
+(`CMAKE_SYSTEM_NAME Windows`, `CMAKE_C_COMPILER x86_64-w64-mingw32-gcc`).
+MSVC is not supported: the code uses C11 atomics and POSIX headers such
+as `<unistd.h>` and `<dirent.h>`, which MinGW provides and MSVC does not.
+Settings go to `%USERPROFILE%\.doomrc` when `HOME` is not set.
+
 ## Running
 
 Put an IWAD (`doom1.wad`, `doom.wad`, `doom2.wad`, `plutonia.wad`,

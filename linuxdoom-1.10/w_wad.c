@@ -34,8 +34,15 @@ rcsid[] = "$Id: w_wad.c,v 1.5 1997/02/03 16:47:57 b1 Exp $";
 #include <malloc.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#ifdef _WIN32
+#include <malloc.h>
+#else
 #include <alloca.h>
+#endif
+// Windows has it, and needs it: WADs are binary.
+#ifndef O_BINARY
 #define O_BINARY		0
+#endif
 #endif
 
 #include "doomtype.h"
@@ -66,12 +73,13 @@ void**			lumpcache;
 
 #define strcmpi	strcasecmp
 
-void strupr (char* s)
+// Named apart from the Windows C runtime's strupr and filelength.
+static void W_Strupr (char* s)
 {
     while (*s) { *s = toupper(*s); s++; }
 }
 
-int filelength (int handle) 
+static int W_FileLength (int handle) 
 { 
     struct stat	fileinfo;
     
@@ -174,7 +182,7 @@ void W_AddFile (char *filename)
 	// single lump file
 	fileinfo = &singleinfo;
 	singleinfo.filepos = 0;
-	singleinfo.size = LONG(filelength(handle));
+	singleinfo.size = LONG(W_FileLength(handle));
 	ExtractFileBase (filename, singleinfo.name);
 	numlumps++;
     }
@@ -367,7 +375,7 @@ int W_CheckNumForName (char* name)
     name8.s[8] = 0;
 
     // case insensitive
-    strupr (name8.s);		
+    W_Strupr (name8.s);		
 
     v1 = name8.x[0];
     v2 = name8.x[1];

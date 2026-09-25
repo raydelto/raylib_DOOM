@@ -734,6 +734,8 @@ void IdentifyVersion (void)
 
     home = getenv("HOME");
     if (!home)
+	home = getenv("USERPROFILE");	// Windows
+    if (!home)
       I_Error("Please set $HOME to your home directory");
     sprintf(basedefault, "%s/.doomrc", home);
 #endif
@@ -1022,7 +1024,11 @@ void D_DoomMain (void)
     if (M_CheckParm("-cdrom"))
     {
 	printf(D_CDROM);
+#ifdef _WIN32
+	mkdir("c:\\doomdata");
+#else
 	mkdir("c:\\doomdata",0);
+#endif
 	strcpy (basedefault,"c:/doomdata/default.cfg");
     }	
     
