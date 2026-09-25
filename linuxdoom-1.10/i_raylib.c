@@ -325,91 +325,139 @@ void RL_SetMouseGrab (int grab)
 //
 // AUDIO
 //
-// The game mixes on the main thread and pushes into this
-// single-producer, single-consumer ring. raylib's audio thread
-// pulls from it and plays silence on underrun.
+// Each stream (sound effects, music) has its own single-producer,
+// single-consumer ring. The game mixes on the main thread and
+// pushes into it; raylib's audio thread pulls from it and plays
+// silence on underrun.
 //
 
 #define RINGFRAMES	8192	// power of two
 
-static AudioStream	stream;
+typedef struct
+{
+    AudioStream		stream;
+    int			open;
+    short		ring[RINGFRAMES*2];
+    atomic_uint		read;
+    atomic_uint		write;
+} rlstream_t;
+
 static int		audioready;
-static short		ring[RINGFRAMES*2];
-static atomic_uint	ringread;
-static atomic_uint	ringwrite;
+static rlstream_t	streams[RL_NUMSTREAMS];
 
 
-static void StreamCallback (void* buffer, unsigned int frames)
+static void DrainStream (rlstream_t* s, void* buffer, unsigned int frames)
 {
     short*	out = (short*)buffer;
-    unsigned	rd = atomic_load_explicit (&ringread, memory_order_relaxed);
-    unsigned	wr = atomic_load_explicit (&ringwrite, memory_order_acquire);
+    unsigned	rd = atomic_load_explicit (&s->read, memory_order_relaxed);
+    unsigned	wr = atomic_load_explicit (&s->write, memory_order_acquire);
     unsigned	avail = wr - rd;
     unsigned	i;
 
     for (i = 0; i < frames && i < avail; i++)
     {
 	unsigned idx = (rd + i) & (RINGFRAMES-1);
-	out[i*2] = ring[idx*2];
-	out[i*2+1] = ring[idx*2+1];
+	out[i*2] = s->ring[idx*2];
+	out[i*2+1] = s->ring[idx*2+1];
     }
 
     if (i < frames)
 	memset (out + i*2, 0, (frames - i) * 2 * sizeof(short));
 
-    atomic_store_explicit (&ringread, rd + i, memory_order_release);
+    atomic_store_explicit (&s->read, rd + i, memory_order_release);
+}
+
+// raylib callbacks carry no user pointer, so one per stream.
+static void SfxCallback (void* buffer, unsigned int frames)
+{
+    DrainStream (&streams[RL_SFX], buffer, frames);
+}
+
+static void MusicCallback (void* buffer, unsigned int frames)
+{
+    DrainStream (&streams[RL_MUSIC], buffer, frames);
 }
 
 
-int RL_InitAudio (int samplerate)
+int RL_InitAudio (void)
 {
+    if (audioready)
+	return 1;
+
     QuietRaylib ();
     InitAudioDevice ();
     if (!IsAudioDeviceReady ())
 	return 0;
 
-    stream = LoadAudioStream (samplerate, 16, 2);
-    SetAudioStreamCallback (stream, StreamCallback);
-    PlayAudioStream (stream);
     audioready = 1;
+    return 1;
+}
+
+
+int RL_OpenStream (int id, int samplerate)
+{
+    rlstream_t*	s = &streams[id];
+
+    if (!audioready || s->open)
+	return s->open;
+
+    s->stream = LoadAudioStream (samplerate, 16, 2);
+    if (s->stream.buffer == NULL)
+	return 0;
+
+    SetAudioStreamCallback (s->stream,
+			    id == RL_MUSIC ? MusicCallback : SfxCallback);
+    PlayAudioStream (s->stream);
+    s->open = 1;
     return 1;
 }
 
 
 void RL_ShutdownAudio (void)
 {
+    int		i;
+
     if (!audioready)
 	return;
 
+    for (i = 0; i < RL_NUMSTREAMS; i++)
+    {
+	if (streams[i].open)
+	    UnloadAudioStream (streams[i].stream);
+	streams[i].open = 0;
+    }
+
     audioready = 0;
-    UnloadAudioStream (stream);
     CloseAudioDevice ();
 }
 
 
-int RL_AudioQueued (void)
+int RL_AudioQueued (int id)
 {
-    return atomic_load_explicit (&ringwrite, memory_order_relaxed)
-	- atomic_load_explicit (&ringread, memory_order_acquire);
+    rlstream_t*	s = &streams[id];
+
+    return atomic_load_explicit (&s->write, memory_order_relaxed)
+	- atomic_load_explicit (&s->read, memory_order_acquire);
 }
 
 
-void RL_QueueAudio (const short* samples, int frames)
+void RL_QueueAudio (int id, const short* samples, int frames)
 {
-    unsigned	wr = atomic_load_explicit (&ringwrite, memory_order_relaxed);
+    rlstream_t*	s = &streams[id];
+    unsigned	wr = atomic_load_explicit (&s->write, memory_order_relaxed);
     int		i;
 
-    if (!audioready || frames > RINGFRAMES - RL_AudioQueued ())
+    if (!s->open || frames > RINGFRAMES - RL_AudioQueued (id))
 	return;
 
     for (i = 0; i < frames; i++)
     {
 	unsigned idx = (wr + i) & (RINGFRAMES-1);
-	ring[idx*2] = samples[i*2];
-	ring[idx*2+1] = samples[i*2+1];
+	s->ring[idx*2] = samples[i*2];
+	s->ring[idx*2+1] = samples[i*2+1];
     }
 
-    atomic_store_explicit (&ringwrite, wr + frames, memory_order_release);
+    atomic_store_explicit (&s->write, wr + frames, memory_order_release);
 }
 
 

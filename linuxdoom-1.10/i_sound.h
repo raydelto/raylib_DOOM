@@ -92,6 +92,8 @@ I_UpdateSoundParams
 //
 void I_InitMusic(void);
 void I_ShutdownMusic(void);
+// Keeps the music stream fed; called from I_UpdateSound.
+void I_UpdateMusic(void);
 // Volume.
 void I_SetMusicVolume(int volume);
 // PAUSE game handling.

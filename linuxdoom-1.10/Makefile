@@ -22,6 +22,8 @@ OBJS=				\
 		$(O)/dstrings.o		\
 		$(O)/i_system.o		\
 		$(O)/i_sound.o		\
+		$(O)/i_music.o		\
+		$(O)/opl3.o		\
 		$(O)/i_video.o		\
 		$(O)/i_raylib.o		\
 		$(O)/i_net.o			\
