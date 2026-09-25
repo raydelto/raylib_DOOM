@@ -618,6 +618,7 @@ I_InitSound()
   }
 
   sound_ready = true;
+  fprintf(stderr, " configured audio device\n");
   
   // Finished initialization.
   fprintf(stderr, "I_InitSound: sound module ready\n");
