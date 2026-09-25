@@ -18,7 +18,12 @@
 //
 //-----------------------------------------------------------------------------
 
+#include <ctype.h>
+#include <math.h>
+#include <signal.h>
 #include <stdatomic.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "raylib.h"
@@ -26,9 +31,14 @@
 #include "i_raylib.h"
 
 
+#define WINDOWTITLE	"DOOM"
+
 // Filled in at the bottom of the file, after the DOOM key macros
 // are included (they would otherwise shadow raylib's KEY_* enums).
 static int TranslateSpecialKey (int index);
+
+static void WSL_Init (void);
+static void WSL_Shutdown (void);
 
 // raylib's INFO chatter would drown DOOM's startup log.
 static void QuietRaylib (void)
@@ -55,7 +65,7 @@ void RL_InitVideo (int width, int height, int scale, int fullscreen)
     SetConfigFlags (FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT);
 
     // DOOM's 320x200 was shown on 4:3 monitors with tall pixels.
-    InitWindow (width*scale, (width*3/4)*scale, "DOOM");
+    InitWindow (width*scale, (width*3/4)*scale, WINDOWTITLE);
     SetWindowMinSize (width, width*3/4);
 
     // ESC is a game key, not a quit key.
@@ -68,6 +78,8 @@ void RL_InitVideo (int width, int height, int scale, int fullscreen)
     screentex = LoadTextureFromImage (blank);
     UnloadImage (blank);
     SetTextureFilter (screentex, TEXTURE_FILTER_POINT);
+
+    WSL_Init ();
 }
 
 
@@ -76,6 +88,7 @@ void RL_ShutdownVideo (void)
     if (!IsWindowReady ())
 	return;
 
+    WSL_Shutdown ();
     UnloadTexture (screentex);
     CloseWindow ();
 }
@@ -138,6 +151,11 @@ static unsigned char	keystate[512];
 static int		mousegrabbed;
 static int		mousebuttons;
 static Vector2		lastmouse;
+
+static int		wslmouse;
+
+static void WSL_Grab (int grab);
+static void WSL_FilterMotion (Vector2 pos, int* dx, int* dy);
 
 // raylib keys without a plain ASCII equivalent,
 // in the same order as TranslateSpecialKey.
@@ -278,6 +296,8 @@ void RL_PumpEvents (void)
     {
 	dx = (int)(pos.x - lastmouse.x);
 	dy = (int)(pos.y - lastmouse.y);
+	if (wslmouse)
+	    WSL_FilterMotion (pos, &dx, &dy);
     }
     lastmouse = pos;
 
@@ -313,13 +333,291 @@ void RL_SetMouseGrab (int grab)
 	return;
 
     mousegrabbed = grab;
-    if (grab)
+    if (wslmouse)
+	WSL_Grab (grab);
+    else if (grab)
 	DisableCursor ();
     else
 	EnableCursor ();
 
     // Moving the cursor is not player movement.
     lastmouse = GetMousePosition ();
+}
+
+
+
+//
+// WSL MOUSE
+//
+// WSLg runs X clients on Xwayland inside Weston, which reaches
+// Windows over RDP and only ever gets absolute pointer positions.
+// GLFW's disabled cursor breaks there in three ways:
+//  - its raw motion events carry the absolute position, not a
+//    delta, so every event turns the player by thousands of pixels;
+//  - warping the pointer back to the centre never moves the real
+//    Windows pointer, so each delta measures the distance from
+//    the centre instead of the movement since the last event;
+//  - an invisible cursor is not passed on, so the Windows arrow
+//    stays on screen and can wander off the window.
+//
+// So under WSL the cursor stays in normal mode, motion comes from
+// absolute positions, the cursor is a single almost transparent
+// pixel (a fully transparent one is dropped), and a PowerShell
+// helper on the Windows side keeps the real pointer inside the
+// window and puts it back in the middle when asked. The jump back
+// to the middle is not player movement and is filtered out.
+//
+
+typedef struct GLFWwindow GLFWwindow;
+typedef struct GLFWcursor GLFWcursor;
+
+typedef struct
+{
+    int			width;
+    int			height;
+    unsigned char*	pixels;
+} glfwimage_t;
+
+// raylib's GLFW, weak so a raylib that hides it still links.
+extern GLFWcursor* glfwCreateCursor (const glfwimage_t* image,
+				     int xhot, int yhot)
+    __attribute__((weak));
+extern void glfwSetCursor (GLFWwindow* window, GLFWcursor* cursor)
+    __attribute__((weak));
+
+// Clips the pointer to the middle of the foreground window when it
+// is ours, and lets go when it no longer is, even if we hang.
+// WSLg titles windows "DOOM (<distro>)".
+static const char wslhelperscript[] =
+    "Add-Type -TypeDefinition '"
+    "using System; using System.Runtime.InteropServices;"
+    " using System.Text; using System.Threading;"
+    " public static class DoomMouse {"
+    " [StructLayout(LayoutKind.Sequential)]"
+    " public struct RECT { public int L, T, R, B; }"
+    " [DllImport(\"user32.dll\")] static extern IntPtr GetForegroundWindow();"
+    " [DllImport(\"user32.dll\")]"
+    " static extern bool GetWindowRect(IntPtr h, out RECT r);"
+    " [DllImport(\"user32.dll\", CharSet = CharSet.Unicode)]"
+    " static extern int GetWindowText(IntPtr h, StringBuilder s, int n);"
+    " [DllImport(\"user32.dll\", CharSet = CharSet.Unicode)]"
+    " static extern int GetClassName(IntPtr h, StringBuilder s, int n);"
+    " [DllImport(\"user32.dll\")] static extern bool ClipCursor(ref RECT r);"
+    " [DllImport(\"user32.dll\", EntryPoint = \"ClipCursor\")]"
+    " static extern bool Unclip(IntPtr r);"
+    " [DllImport(\"user32.dll\")] static extern bool SetCursorPos(int x, int y);"
+    " [DllImport(\"user32.dll\")] static extern bool SetProcessDPIAware();"
+    " static readonly object mutex = new object();"
+    " static IntPtr win; static string title; static Timer watchdog;"
+    " public static void Init(string t) {"
+    "  title = t; SetProcessDPIAware();"
+    "  AppDomain.CurrentDomain.ProcessExit += delegate { Release(); };"
+    "  watchdog = new Timer(delegate { lock (mutex) {"
+    "   if (win != IntPtr.Zero && GetForegroundWindow() != win) Release();"
+    "  } }, null, 100, 100); }"
+    " public static void Grab() { lock (mutex) {"
+    "  IntPtr h = GetForegroundWindow();"
+    "  StringBuilder s = new StringBuilder(256);"
+    "  StringBuilder k = new StringBuilder(256);"
+    "  GetWindowText(h, s, 256); GetClassName(h, k, 256);"
+    "  string n = s.ToString();"
+    "  if (k.ToString() != \"RAIL_WINDOW\""
+    "   || (n != title && !n.StartsWith(title + \" (\"))) return;"
+    "  win = h; Center(); } }"
+    " public static void Center() { lock (mutex) {"
+    "  RECT r;"
+    "  if (win == IntPtr.Zero || GetForegroundWindow() != win"
+    "   || !GetWindowRect(win, out r)) return;"
+    "  int x = (r.L + r.R) / 2; int y = (r.T + r.B) / 2;"
+    "  int d = Math.Max(Math.Min(r.R - r.L, r.B - r.T) / 2 - 96, 16);"
+    "  RECT c; c.L = x - d; c.T = y - d; c.R = x + d; c.B = y + d;"
+    "  ClipCursor(ref c); SetCursorPos(x, y); } }"
+    " public static void Release() { lock (mutex) {"
+    "  if (win == IntPtr.Zero) return;"
+    "  win = IntPtr.Zero; Unclip(IntPtr.Zero); } } }'\n"
+    "[DoomMouse]::Init('" WINDOWTITLE "')\n";
+
+static FILE*		wslhelper;
+static GLFWcursor*	wslcursor;
+static int		wslwaiting;	// polls since asking for a re-centre
+static int		wslanchored;
+static Vector2		wslanchor;	// where a re-centre lands
+static Vector2		wslwinpos;
+static int		wslwinw;
+static int		wslwinh;
+
+
+static int IsWSL (void)
+{
+    const char*	env;
+    FILE*	f;
+    char	buf[256];
+    int		i;
+    int		found = 0;
+
+    // DOOM_WSL_MOUSE=0/1 overrides the detection.
+    env = getenv ("DOOM_WSL_MOUSE");
+    if (env && *env)
+	return atoi (env) != 0;
+
+    if (getenv ("WSL_DISTRO_NAME"))
+	return 1;
+
+    f = fopen ("/proc/sys/kernel/osrelease", "r");
+    if (!f)
+	return 0;
+    if (fgets (buf, sizeof(buf), f))
+    {
+	for (i = 0; buf[i]; i++)
+	    buf[i] = tolower ((unsigned char)buf[i]);
+	found = strstr (buf, "microsoft") != NULL;
+    }
+    fclose (f);
+    return found;
+}
+
+
+static void WSL_Command (const char* cmd)
+{
+    if (!wslhelper)
+	return;
+
+    fprintf (wslhelper, "[DoomMouse]::%s()\n", cmd);
+    fflush (wslhelper);
+}
+
+
+static void WSL_Init (void)
+{
+    static unsigned char	pixel[4] = { 0, 0, 0, 1 };
+    glfwimage_t			image = { 1, 1, pixel };
+
+    wslmouse = IsWSL ();
+    if (!wslmouse)
+	return;
+
+    if (glfwCreateCursor)
+	wslcursor = glfwCreateCursor (&image, 0, 0);
+
+    // A helper that is missing or dies must not take us with it.
+    signal (SIGPIPE, SIG_IGN);
+    wslhelper = popen ("P=$(command -v powershell.exe)"
+		       " || P=/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe;"
+		       " exec \"$P\" -NoLogo -NoProfile -NonInteractive -Command -"
+		       " >/dev/null 2>&1", "w");
+    if (wslhelper)
+    {
+	fputs (wslhelperscript, wslhelper);
+	fflush (wslhelper);
+    }
+}
+
+
+static void WSL_Shutdown (void)
+{
+    if (!wslhelper)
+	return;
+
+    WSL_Command ("Release");
+    pclose (wslhelper);
+    wslhelper = NULL;
+}
+
+
+static void WSL_Grab (int grab)
+{
+    if (glfwSetCursor && wslcursor)
+	glfwSetCursor (GetWindowHandle (), grab ? wslcursor : NULL);
+
+    wslwaiting = 0;
+    if (!grab)
+    {
+	WSL_Command ("Release");
+	return;
+    }
+
+    // The window may have moved since the last grab.
+    wslanchored = 0;
+    WSL_Command ("Grab");
+    wslwaiting = 1;
+}
+
+
+static float Distance (Vector2 a, Vector2 b)
+{
+    return hypotf (a.x - b.x, a.y - b.y);
+}
+
+
+//
+// WSL_FilterMotion
+// Drops the jump when the helper re-centres the pointer, and asks
+// for a re-centre once the pointer has strayed from the middle.
+//
+static void WSL_FilterMotion (Vector2 pos, int* dx, int* dy)
+{
+    Vector2	winpos = GetWindowPosition ();
+    int		winw = GetScreenWidth ();
+    int		winh = GetScreenHeight ();
+    float	radius = (winw < winh ? winw : winh) / 16.0f;
+    Vector2	target;
+
+    if (winpos.x != wslwinpos.x || winpos.y != wslwinpos.y
+	|| winw != wslwinw || winh != wslwinh)
+    {
+	// Moved or resized: the middle is somewhere else now.
+	wslwinpos = winpos;
+	wslwinw = winw;
+	wslwinh = winh;
+	wslanchored = 0;
+    }
+
+    // Until a landing has been seen, guess the middle of the window.
+    // Window decorations put the real spot a little off from that.
+    target = wslanchored ? wslanchor
+	: (Vector2) { winw / 2.0f, winh / 2.0f };
+
+    if (wslwaiting)
+    {
+	float before = Distance (lastmouse, target);
+
+	if (before >= radius && Distance (pos, target) < before / 2)
+	{
+	    // Landed. Anything past the landing spot is real movement.
+	    if (wslanchored)
+	    {
+		*dx = (int)(pos.x - wslanchor.x);
+		*dy = (int)(pos.y - wslanchor.y);
+	    }
+	    else
+	    {
+		*dx = *dy = 0;
+		wslanchor = pos;
+		wslanchored = 1;
+	    }
+	    wslwaiting = 0;
+	    return;
+	}
+
+	if (++wslwaiting > 10)
+	{
+	    // Never saw it land, likely because the pointer was
+	    // already in the middle. Take where it is as the middle.
+	    if (!wslanchored)
+	    {
+		wslanchor = pos;
+		wslanchored = 1;
+	    }
+	    wslwaiting = 0;
+	}
+	return;
+    }
+
+    if (Distance (pos, target) > radius)
+    {
+	WSL_Command ("Center");
+	wslwaiting = 1;
+    }
 }
 
 
