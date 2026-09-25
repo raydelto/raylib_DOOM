@@ -150,7 +150,7 @@ int 		eventtail;
 void D_PostEvent (event_t* ev)
 {
     events[eventhead] = *ev;
-    eventhead = (++eventhead)&(MAXEVENTS-1);
+    eventhead = (eventhead+1)&(MAXEVENTS-1);
 }
 
 
@@ -167,7 +167,7 @@ void D_ProcessEvents (void)
 	 && (W_CheckNumForName("map01")<0) )
       return;
 	
-    for ( ; eventtail != eventhead ; eventtail = (++eventtail)&(MAXEVENTS-1) )
+    for ( ; eventtail != eventhead ; eventtail = (eventtail+1)&(MAXEVENTS-1) )
     {
 	ev = &events[eventtail];
 	if (M_Responder (ev))
@@ -555,6 +555,20 @@ void D_AddFile (char *file)
 }
 
 //
+// WadPath
+// Returns a malloc'ed "dir/name".
+//
+static char* WadPath (char* dir, char* name)
+{
+    char*	path;
+
+    path = malloc (strlen(dir) + 1 + strlen(name) + 1);
+    sprintf (path, "%s/%s", dir, name);
+    return path;
+}
+
+
+//
 // IdentifyVersion
 // Checks availability of IWAD files by name,
 // to determine whether registered/commercial features
@@ -580,33 +594,24 @@ void IdentifyVersion (void)
 	doomwaddir = ".";
 
     // Commercial.
-    doom2wad = malloc(strlen(doomwaddir)+1+9+1);
-    sprintf(doom2wad, "%s/doom2.wad", doomwaddir);
+    doom2wad = WadPath (doomwaddir, "doom2.wad");
 
     // Retail.
-    doomuwad = malloc(strlen(doomwaddir)+1+8+1);
-    sprintf(doomuwad, "%s/doomu.wad", doomwaddir);
+    doomuwad = WadPath (doomwaddir, "doomu.wad");
     
     // Registered.
-    doomwad = malloc(strlen(doomwaddir)+1+8+1);
-    sprintf(doomwad, "%s/doom.wad", doomwaddir);
+    doomwad = WadPath (doomwaddir, "doom.wad");
     
     // Shareware.
-    doom1wad = malloc(strlen(doomwaddir)+1+9+1);
-    sprintf(doom1wad, "%s/doom1.wad", doomwaddir);
+    doom1wad = WadPath (doomwaddir, "doom1.wad");
 
-     // Bug, dear Shawn.
-    // Insufficient malloc, caused spurious realloc errors.
-    plutoniawad = malloc(strlen(doomwaddir)+1+/*9*/12+1);
-    sprintf(plutoniawad, "%s/plutonia.wad", doomwaddir);
+    plutoniawad = WadPath (doomwaddir, "plutonia.wad");
 
-    tntwad = malloc(strlen(doomwaddir)+1+9+1);
-    sprintf(tntwad, "%s/tnt.wad", doomwaddir);
+    tntwad = WadPath (doomwaddir, "tnt.wad");
 
 
     // French stuff.
-    doom2fwad = malloc(strlen(doomwaddir)+1+10+1);
-    sprintf(doom2fwad, "%s/doom2f.wad", doomwaddir);
+    doom2fwad = WadPath (doomwaddir, "doom2f.wad");
 
     home = getenv("HOME");
     if (!home)
@@ -1119,7 +1124,7 @@ void D_DoomMain (void)
 	// for statistics driver
 	extern  void*	statcopy;                            
 
-	statcopy = (void*)atoi(myargv[p+1]);
+	statcopy = (void*)(intptr_t)atoll(myargv[p+1]);
 	printf ("External statistics registered.\n");
     }
     

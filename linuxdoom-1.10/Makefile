@@ -6,9 +6,11 @@
 #
 CC=  gcc  # gcc or g++
 
-CFLAGS=-g -Wall -DNORMALUNIX -DLINUX # -DUSEASM 
-LDFLAGS=-L/usr/X11R6/lib
-LIBS=-lXext -lX11 -lnsl -lm
+# raylib is found through pkg-config; see ../README.md
+CFLAGS=-g -O2 -std=gnu11 -fwrapv -fno-strict-aliasing -Wall \
+	-DNORMALUNIX -DLINUX $(shell pkg-config --cflags raylib)
+LDFLAGS=
+LIBS=$(shell pkg-config --libs raylib) -lm
 
 # subdirectory for objects
 O=linux
@@ -21,6 +23,7 @@ OBJS=				\
 		$(O)/i_system.o		\
 		$(O)/i_sound.o		\
 		$(O)/i_video.o		\
+		$(O)/i_raylib.o		\
 		$(O)/i_net.o			\
 		$(O)/tables.o			\
 		$(O)/f_finale.o		\
@@ -77,17 +80,18 @@ OBJS=				\
 		$(O)/info.o				\
 		$(O)/sounds.o
 
-all:	 $(O)/linuxxdoom
+all:	 $(O)/raylibdoom
 
 clean:
 	rm -f *.o *~ *.flc
 	rm -f linux/*
 
-$(O)/linuxxdoom:	$(OBJS) $(O)/i_main.o
+$(O)/raylibdoom:	$(OBJS) $(O)/i_main.o
 	$(CC) $(CFLAGS) $(LDFLAGS) $(OBJS) $(O)/i_main.o \
-	-o $(O)/linuxxdoom $(LIBS)
+	-o $(O)/raylibdoom $(LIBS)
 
 $(O)/%.o:	%.c
+	@mkdir -p $(O)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 #############################################################

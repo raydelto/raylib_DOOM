@@ -71,7 +71,8 @@ rcsid[] = "$Id: g_game.c,v 1.8 1997/02/03 22:45:09 b1 Exp $";
 #include "g_game.h"
 
 
-#define SAVEGAMESIZE	0x2c000
+// 64-bit structs are larger than the original 0x2c000 allowed for.
+#define SAVEGAMESIZE	0x100000
 #define SAVESTRINGSIZE	24
 
 
@@ -492,8 +493,8 @@ void G_DoLoadLevel (void)
     joyxmove = joyymove = 0; 
     mousex = mousey = 0; 
     sendpause = sendsave = paused = false; 
-    memset (mousebuttons, 0, sizeof(mousebuttons)); 
-    memset (joybuttons, 0, sizeof(joybuttons)); 
+    memset (mousearray, 0, sizeof(mousearray)); 
+    memset (joyarray, 0, sizeof(joyarray)); 
 } 
  
  
@@ -1281,7 +1282,9 @@ void G_DoSaveGame (void)
 	sprintf (name,SAVEGAMENAME"%d.dsg",savegameslot); 
     description = savedescription; 
 	 
-    save_p = savebuffer = screens[1]+0x4000; 
+    save_p = savebuffer = malloc (SAVEGAMESIZE); 
+    if (!savebuffer)
+	I_Error ("G_DoSaveGame: out of memory");
 	 
     memcpy (save_p, description, SAVESTRINGSIZE); 
     save_p += SAVESTRINGSIZE; 
@@ -1310,6 +1313,7 @@ void G_DoSaveGame (void)
     if (length > SAVEGAMESIZE) 
 	I_Error ("Savegame buffer overrun"); 
     M_WriteFile (name, savebuffer, length); 
+    free (savebuffer);
     gameaction = ga_nothing; 
     savedescription[0] = 0;		 
 	 
