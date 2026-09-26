@@ -62,8 +62,10 @@ Controls
 
 The mouse is released in menus, when paused and during demos. Keys can
 be changed in %USERPROFILE%\.doomrc, where settings are saved.
-Savegames (doomsav0.dsg ... doomsav5.dsg) go to the current folder,
-which is the program's folder when you start it from Explorer.
+Savegames (doomsav0.dsg ... doomsav5.dsg) are kept next to
+raylibdoom.exe when you start it from Explorer or a shortcut, and in
+the current folder when you start it from a terminal. Extract the zip
+somewhere you can write to, such as your Desktop or Documents.
 
 Command line
 ------------

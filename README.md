@@ -56,7 +56,8 @@ Settings go to `%USERPROFILE%\.doomrc` when `HOME` is not set.
 
 On Windows the game looks for IWADs next to `raylibdoom.exe` when
 `DOOMWADDIR` is not set. Started from Explorer, it hides its console
-window and shows fatal errors in a message box.
+window, keeps savegames next to the executable, and shows fatal errors
+in a message box.
 
 The Windows x64 release, `raylibdoom-<version>-windows-x64.zip`, is a
 portable folder with a single statically linked `raylibdoom.exe`, built

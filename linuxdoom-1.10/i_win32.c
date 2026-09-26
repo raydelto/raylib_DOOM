@@ -36,23 +36,21 @@ static int consolehidden;
 
 void I_Win32Init (void)
 {
-    char	path[MAX_PATH];
+    char	dir[MAX_PATH];
     char*	slash;
     DWORD	pids[2];
     DWORD	len;
 
+    len = GetModuleFileNameA (NULL, dir, sizeof(dir));
+    slash = len > 0 && len < sizeof(dir) ? strrchr (dir, '\\') : NULL;
+    if (!slash)
+	return;
+    *slash = 0;
+
     // Look for IWADs next to raylibdoom.exe unless told otherwise,
     // so the portable zip works from any current directory.
-    len = GetModuleFileNameA (NULL, path, sizeof(path));
-    if (!getenv ("DOOMWADDIR") && len > 0 && len < sizeof(path))
-    {
-	slash = strrchr (path, '\\');
-	if (slash)
-	{
-	    *slash = 0;
-	    _putenv_s ("DOOMWADDIR", path);
-	}
-    }
+    if (!getenv ("DOOMWADDIR"))
+	_putenv_s ("DOOMWADDIR", dir);
 
     // A console that no other process shares was made for us by
     // Explorer. Close it: the game has its own window. When run
@@ -64,6 +62,12 @@ void I_Win32Init (void)
     {
 	FreeConsole ();
 	consolehidden = 1;
+
+	// Savegames go to the current directory, which for a program
+	// started from a shortcut, the Run box or a drag and drop may
+	// be anywhere (often System32, where they can't be written).
+	// Keep them next to the executable, like the IWAD.
+	SetCurrentDirectoryA (dir);
     }
 }
 
