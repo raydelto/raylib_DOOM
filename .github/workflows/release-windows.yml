@@ -1,0 +1,157 @@
+name: release-windows
+
+# A v* tag builds the Windows x64 portable zip and uploads it to the
+# draft GitHub Release for the tag. workflow_dispatch, and pull
+# requests that change the packaging, build it and keep it as an
+# Actions artifact only.
+
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    paths:
+      - '.github/workflows/release-windows.yml'
+      - 'packaging/windows/**'
+      - 'linuxdoom-1.10/i_win32.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Package version (default: 0.0.0+git.<short sha>)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: windows-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            git zip
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+
+      - name: Version
+        id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then
+            version=${GITHUB_REF_NAME#v}
+          elif [ -n "${INPUT_VERSION}" ]; then
+            version=${INPUT_VERSION#v}
+          else
+            version=0.0.0+git.$(git rev-parse --short=7 HEAD)
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Version: $version"
+
+      # raylib 5.5 always comes from FetchContent, never from a raylib
+      # installed in MSYS2. -static links libgcc and winpthread (and
+      # anything else from MinGW) into the executable.
+      - name: Configure
+        run: |
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_DISABLE_FIND_PACKAGE_raylib=ON \
+            -DCMAKE_EXE_LINKER_FLAGS=-static
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Package
+        run: |
+          gcc --version | head -1
+          packaging/windows/make-package.sh "${{ steps.version.outputs.version }}" build dist
+          objdump -p build/raylibdoom.exe | grep -E 'DLL Name|Subsystem'
+
+      # Unzip the package in an empty folder and run it with no IWAD:
+      # it must start without any MinGW DLL, look for the IWAD next to
+      # itself, and exit with an error. The runner has no GPU, so the
+      # game is not played here; that is tested on real hardware.
+      - name: Smoke test
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem dist/*.zip
+          $dir = Join-Path $env:RUNNER_TEMP smoke
+          Expand-Archive $zip -DestinationPath $dir
+          $exe = Get-ChildItem $dir -Recurse -Filter raylibdoom.exe
+          Push-Location $env:RUNNER_TEMP
+          $out = & $exe.FullName -nosound 2>&1 | Out-String
+          $code = $LASTEXITCODE
+          Pop-Location
+          Write-Output $out
+          if ($code -eq 0) { throw "expected a non-zero exit with no IWAD" }
+          if ($out -notmatch 'IWAD') { throw "no IWAD message" }
+          if (-not $out.Contains($exe.DirectoryName)) { throw "did not look next to the exe" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: raylibdoom-${{ steps.version.outputs.version }}-windows-x64
+          path: dist/
+          if-no-files-found: error
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: raylibdoom-${{ needs.package.outputs.version }}-windows-x64
+          path: dist
+
+      # The other OS release workflows run on the same tag and may
+      # create the draft at the same moment. Drafts are not tied to the
+      # tag, so a race can leave two; everyone uploads to the oldest,
+      # and a draft this job made that lost the race is deleted.
+      - name: Upload to the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          drafts() {
+            gh api --paginate "repos/$GH_REPO/releases" \
+              --jq ".[] | select(.tag_name == \"$TAG\") | .id" | sort -n
+          }
+          mine=
+          if [ -z "$(drafts)" ]; then
+            if url=$(gh release create "$TAG" --draft --verify-tag \
+                       --title "$TAG" --notes "raylib DOOM $TAG"); then
+              mine=$(gh api "repos/$GH_REPO/releases" \
+                       --jq ".[] | select(.html_url == \"$url\") | .id")
+            fi
+          fi
+          id=$(drafts | head -1)
+          [ -n "$id" ] || { echo "no release for $TAG" >&2; exit 1; }
+          if [ -n "$mine" ] && [ "$mine" != "$id" ]; then
+            gh api -X DELETE "repos/$GH_REPO/releases/$mine"
+          fi
+          draft=$(gh api "repos/$GH_REPO/releases/$id" --jq .draft)
+          echo "Uploading to release $id (draft: $draft)"
+          for f in dist/*; do
+            name=$(basename "$f")
+            old=$(gh api "repos/$GH_REPO/releases/$id/assets" --paginate \
+                    --jq ".[] | select(.name == \"$name\") | .id")
+            [ -z "$old" ] || gh api -X DELETE "repos/$GH_REPO/releases/assets/$old"
+            gh api -X POST -H "Content-Type: application/octet-stream" \
+              "https://uploads.github.com/repos/$GH_REPO/releases/$id/assets?name=$name" \
+              --input "$f" --jq .browser_download_url
+          done

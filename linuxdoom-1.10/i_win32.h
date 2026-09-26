@@ -1,9 +1,7 @@
-// Emacs style mode select   -*- C++ -*- 
+// Emacs style mode select   -*- C++ -*-
 //-----------------------------------------------------------------------------
 //
 // $Id:$
-//
-// Copyright (C) 1993-1996 by id Software, Inc.
 //
 // This source is available for distribution and/or modification
 // only under the terms of the DOOM Source Code License as
@@ -14,37 +12,23 @@
 // FITNESS FOR A PARTICULAR PURPOSE. See the DOOM Source Code License
 // for more details.
 //
-// $Log:$
-//
 // DESCRIPTION:
-//	Main program, simply calls D_DoomMain high level loop.
+//	Windows-only startup and error reporting (i_win32.c).
 //
 //-----------------------------------------------------------------------------
 
-static const char
-rcsid[] = "$Id: i_main.c,v 1.4 1997/02/03 22:45:10 b1 Exp $";
-
-
-
-#include "doomdef.h"
-
-#include "m_argv.h"
-#include "d_main.h"
-#include "i_win32.h"
-
-int
-main
-( int		argc,
-  char**	argv ) 
-{ 
-    myargc = argc; 
-    myargv = argv; 
+#ifndef __I_WIN32__
+#define __I_WIN32__
 
 #ifdef _WIN32
-    I_Win32Init ();
-#endif
- 
-    D_DoomMain (); 
 
-    return 0;
-} 
+// Default DOOMWADDIR to the executable's folder, and hide the
+// console window when started from Explorer.
+void I_Win32Init (void);
+
+// Show a fatal error in a message box if there is no console.
+void I_Win32ErrorBox (const char* message);
+
+#endif
+
+#endif

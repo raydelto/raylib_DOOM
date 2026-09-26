@@ -47,6 +47,7 @@ rcsid[] = "$Id: m_bbox.c,v 1.1 1997/02/03 22:45:10 b1 Exp $";
 #pragma implementation "i_system.h"
 #endif
 #include "i_system.h"
+#include "i_win32.h"
 
 
 
@@ -192,6 +193,17 @@ void I_Error (char *error, ...)
     va_end (argptr);
 
     fflush( stderr );
+
+#ifdef _WIN32
+    {
+	char	message[512];
+
+	va_start (argptr,error);
+	vsnprintf (message, sizeof(message), error, argptr);
+	va_end (argptr);
+	I_Win32ErrorBox (message);
+    }
+#endif
 
     // Shutdown. Here might be other errors.
     if (demorecording)
