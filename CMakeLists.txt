@@ -43,6 +43,7 @@ target_compile_definitions(raylibdoom PRIVATE NORMALUNIX LINUX)
 target_link_libraries(raylibdoom PRIVATE raylib m)
 if(WIN32)
   target_link_libraries(raylibdoom PRIVATE ws2_32)
+  target_sources(raylibdoom PRIVATE ${DOOM_DIR}/i_win32.c)
 endif()
 
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")

@@ -40,6 +40,14 @@ Apple Silicon and Intel.
 
 ### Windows
 
+The Windows x64 release, `raylibdoom-<version>-windows-x64.zip`, is a
+portable folder with a single statically linked `raylibdoom.exe`, built
+by `.github/workflows/release-windows.yml` with
+`packaging/windows/make-package.sh`. On Windows the game looks for
+IWADs next to `raylibdoom.exe` when `DOOMWADDIR` is not set. Started
+from Explorer, it hides its console window, keeps savegames next to
+the executable, and shows fatal errors in a message box.
+
 Build with MinGW-w64 GCC, for example from
 [w64devkit](https://github.com/skeeto/w64devkit) or MSYS2:
 
