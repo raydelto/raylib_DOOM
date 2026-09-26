@@ -54,10 +54,22 @@ MSVC is not supported: the code uses C11 atomics and POSIX headers such
 as `<unistd.h>` and `<dirent.h>`, which MinGW provides and MSVC does not.
 Settings go to `%USERPROFILE%\.doomrc` when `HOME` is not set.
 
+### Ubuntu packages
+
+`.github/workflows/release-linux.yml` builds `raylibdoom_<version>_amd64.deb`
+and `raylibdoom-<version>-linux-x86_64.tar.gz` on Ubuntu 22.04 (they run on
+22.04, 24.04 and newer); the scripts are in `packaging/linux/`. Pushing a
+`v*` tag uploads them to the draft release; running the workflow by hand
+keeps them as an Actions artifact. `sudo apt install ./raylibdoom_*.deb`
+installs `/usr/games/raylibdoom` with a menu entry;
+`sudo apt install freedoom` adds free IWADs it finds.
+
 ## Running
 
 Put an IWAD (`doom1.wad`, `doom.wad`, `doom2.wad`, `plutonia.wad`,
-`tnt.wad`, ...) in the current directory or in `$DOOMWADDIR`, then:
+`tnt.wad`, Freedoom's `freedoom1.wad` / `freedoom2.wad`, ...) in
+`$DOOMWADDIR`, the current directory, `/usr/local/share/games/doom` or
+`/usr/share/games/doom` (searched in that order), then:
 
 ```sh
 ./build/raylibdoom
@@ -72,6 +84,7 @@ identified from the maps it contains:
 ```
 
 An IWAD passed with `-file` (`-file DOOM1.WAD`) is also used as the IWAD.
+If no IWAD is found, the game says where it looked and exits.
 
 | Option               | Effect                                    |
 | -------------------- | ----------------------------------------- |

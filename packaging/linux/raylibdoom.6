@@ -1,0 +1,57 @@
+.TH RAYLIBDOOM 6 "2026" "raylib DOOM" "Games"
+.SH NAME
+raylibdoom \- the 1997 Linux DOOM source release, running on raylib
+.SH SYNOPSIS
+.B raylibdoom
+.RI [ options ]
+.SH DESCRIPTION
+.B raylibdoom
+is id Software's 1997 Linux DOOM source release, ported from X11 and
+OSS to raylib. It needs an IWAD (game data file), which is not included.
+Use
+.I doom1.wad
+from the shareware episode, your own
+.IR doom.wad " or " doom2.wad ,
+or Freedoom's free
+.IR freedoom1.wad " or " freedoom2.wad
+from https://freedoom.github.io.
+.PP
+The IWAD is looked for, in this order, in
+.BR $DOOMWADDIR ,
+the current directory,
+.IR /usr/local/share/games/doom " and " /usr/share/games/doom .
+Upper- or mixed-case file names are found too.
+.SH OPTIONS
+.TP
+.BI \-iwad " file"
+Use
+.I file
+as the IWAD, under any name.
+.TP
+.BI \-file " files..."
+Load PWADs.
+.TP
+.BR \-1 " ... " \-4 ", " \-scale " \fIn\fR"
+Window size as a multiple of 320x240 (default 3).
+.TP
+.B \-fullscreen
+Start borderless fullscreen. Alt+Enter toggles it.
+.TP
+.B \-nosound
+No audio device.
+.TP
+.B \-nomusic
+Sound effects only.
+.TP
+.BI \-warp " e m" ", " \-skill " n" ", " \-loadgame " n"
+As in the original.
+.SH ENVIRONMENT
+.TP
+.B DOOMWADDIR
+A directory to look for the IWAD in first.
+.SH FILES
+.TP
+.I ~/.doomrc
+Settings.
+.SH SEE ALSO
+https://github.com/raydelto/raylib_DOOM

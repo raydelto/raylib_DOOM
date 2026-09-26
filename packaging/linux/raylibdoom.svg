@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7a0e0e"/>
+      <stop offset="1" stop-color="#2a0404"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="36" fill="url(#bg)"/>
+  <rect x="8" y="8" width="240" height="240" rx="36" fill="none" stroke="#e8a33a" stroke-width="8"/>
+  <!-- A blocky "D", drawn as pixels in the spirit of the 320x200 renderer. -->
+  <path fill-rule="evenodd" fill="#f2c14e" d="M64 56h96v16h16v16h16v80h-16v16h-16v16H64zM96 88v80h56v-16h16V104h-16V88z"/>
+  <rect x="64" y="208" width="128" height="12" fill="#e8a33a"/>
+</svg>

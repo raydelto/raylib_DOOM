@@ -685,6 +685,79 @@ static boolean UseIWAD (char* path)
 }
 
 
+// The IWADs looked for, best first, and the directories looked in:
+// $DOOMWADDIR, the current directory, then the system-wide
+// directories where distribution packages (freedoom,
+// game-data-packager) install IWADs.
+typedef struct
+{
+    char*	name;
+    GameMode_t	mode;
+    Language_t	language;
+} iwadname_t;
+
+static iwadname_t iwadnames[] =
+{
+    {"doom2f.wad",	commercial,	french},
+    {"doom2.wad",	commercial,	english},
+    {"plutonia.wad",	commercial,	english},
+    {"tnt.wad",		commercial,	english},
+    {"doomu.wad",	retail,		english},
+    {"doom.wad",	registered,	english},
+    {"doom1.wad",	shareware,	english},
+    {"freedoom2.wad",	commercial,	english},
+    {"freedoom1.wad",	retail,		english},
+    {"freedm.wad",	commercial,	english},
+};
+
+static char* iwaddirs[] =
+{
+    NULL,	// $DOOMWADDIR
+    ".",
+    "/usr/local/share/games/doom",
+    "/usr/share/games/doom",
+};
+
+#define NUMIWADNAMES	(sizeof(iwadnames)/sizeof(iwadnames[0]))
+#define NUMIWADDIRS	(sizeof(iwaddirs)/sizeof(iwaddirs[0]))
+
+
+//
+// FindIWAD
+// Loads the best IWAD in the first directory that has one.
+//
+static boolean FindIWAD (void)
+{
+    int		d;
+    int		i;
+    char*	path;
+
+    iwaddirs[0] = getenv ("DOOMWADDIR");
+
+    for (d = 0; d < NUMIWADDIRS; d++)
+    {
+	if (!iwaddirs[d] || !iwaddirs[d][0])
+	    continue;
+
+	for (i = 0; i < NUMIWADNAMES; i++)
+	{
+	    path = WadPath (iwaddirs[d], iwadnames[i].name);
+	    if (!access (path, R_OK))
+	    {
+		gamemode = iwadnames[i].mode;
+		language = iwadnames[i].language;
+		if (language == french)
+		    printf("French version\n");
+		D_AddFile (path);
+		return true;
+	    }
+	    free (path);
+	}
+    }
+    return false;
+}
+
+
 //
 // IdentifyVersion
 // Checks availability of IWAD files by name,
@@ -693,44 +766,11 @@ static boolean UseIWAD (char* path)
 //
 void IdentifyVersion (void)
 {
-
-    char*	doom1wad;
-    char*	doomwad;
-    char*	doomuwad;
-    char*	doom2wad;
-
-    char*	doom2fwad;
-    char*	plutoniawad;
-    char*	tntwad;
-
     int		p;
+    int		d;
 
 #ifdef NORMALUNIX
     char *home;
-    char *doomwaddir;
-    doomwaddir = getenv("DOOMWADDIR");
-    if (!doomwaddir)
-	doomwaddir = ".";
-
-    // Commercial.
-    doom2wad = WadPath (doomwaddir, "doom2.wad");
-
-    // Retail.
-    doomuwad = WadPath (doomwaddir, "doomu.wad");
-    
-    // Registered.
-    doomwad = WadPath (doomwaddir, "doom.wad");
-    
-    // Shareware.
-    doom1wad = WadPath (doomwaddir, "doom1.wad");
-
-    plutoniawad = WadPath (doomwaddir, "plutonia.wad");
-
-    tntwad = WadPath (doomwaddir, "tnt.wad");
-
-
-    // French stuff.
-    doom2fwad = WadPath (doomwaddir, "doom2f.wad");
 
     home = getenv("HOME");
     if (!home)
@@ -791,58 +831,8 @@ void IdentifyVersion (void)
 	return;
     }
 
-    if ( !access (doom2fwad,R_OK) )
-    {
-	gamemode = commercial;
-	// C'est ridicule!
-	// Let's handle languages in config files, okay?
-	language = french;
-	printf("French version\n");
-	D_AddFile (doom2fwad);
+    if (FindIWAD ())
 	return;
-    }
-
-    if ( !access (doom2wad,R_OK) )
-    {
-	gamemode = commercial;
-	D_AddFile (doom2wad);
-	return;
-    }
-
-    if ( !access (plutoniawad, R_OK ) )
-    {
-      gamemode = commercial;
-      D_AddFile (plutoniawad);
-      return;
-    }
-
-    if ( !access ( tntwad, R_OK ) )
-    {
-      gamemode = commercial;
-      D_AddFile (tntwad);
-      return;
-    }
-
-    if ( !access (doomuwad,R_OK) )
-    {
-      gamemode = retail;
-      D_AddFile (doomuwad);
-      return;
-    }
-
-    if ( !access (doomwad,R_OK) )
-    {
-      gamemode = registered;
-      D_AddFile (doomwad);
-      return;
-    }
-
-    if ( !access (doom1wad,R_OK) )
-    {
-      gamemode = shareware;
-      D_AddFile (doom1wad);
-      return;
-    }
 
     // An IWAD given with -file, as in "doom -file DOOM1.WAD".
     p = M_CheckParm ("-file");
@@ -853,14 +843,21 @@ void IdentifyVersion (void)
 		return;
     }
 
-    printf("Game mode indeterminate: no IWAD (doom1.wad, doom.wad, doom2.wad,\n"
-	   "plutonia.wad, tnt.wad...) found in %s.\n"
-	   "Put one there, or set DOOMWADDIR to its directory.\n", doomwaddir);
-    gamemode = indetermined;
-
-    // We don't abort. Let's see what the PWAD contains.
-    //exit(1);
-    //I_Error ("Game mode indeterminate\n");
+    fprintf (stderr,
+	     "\nNo IWAD found. DOOM needs its game data: a file such as\n"
+	     "doom1.wad (the shareware episode), doom.wad, doom2.wad, or\n"
+	     "Freedoom's freedoom1.wad / freedoom2.wad (free, from\n"
+	     "https://freedoom.github.io). Looked in:\n");
+    for (d = 0; d < NUMIWADDIRS; d++)
+    {
+	if (d == 0)
+	    fprintf (stderr, "  $DOOMWADDIR (%s)\n",
+		     iwaddirs[0] ? iwaddirs[0] : "not set");
+	else
+	    fprintf (stderr, "  %s\n", iwaddirs[d]);
+    }
+    I_Error ("No IWAD found. Put one in one of the directories above,\n"
+	     "set DOOMWADDIR to its directory, or name it with -iwad FILE.");
 }
 
 //
