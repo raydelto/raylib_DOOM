@@ -130,8 +130,11 @@ static void BundleSetup (int argc, char** argv)
     snprintf (appdir, sizeof(appdir), "%s", exe);
     *strrchr (appdir, '/') = '\0';
 
-    snprintf (support, sizeof(support),
-	      "%s/Library/Application Support/raylibDOOM", home);
+    snprintf (support, sizeof(support), "%s/Library", home);
+    mkdir (support, 0700);
+    snprintf (support, sizeof(support), "%s/Library/Application Support", home);
+    mkdir (support, 0755);
+    strcat (support, "/raylibDOOM");
     mkdir (support, 0755);
     if (chdir (support))
 	chdir (home);
