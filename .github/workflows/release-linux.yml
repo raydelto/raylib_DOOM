@@ -1,0 +1,145 @@
+name: release-linux
+
+# A v* tag builds the Ubuntu x86_64 packages and uploads them to the
+# draft GitHub Release for the tag. workflow_dispatch builds them and
+# keeps them as an Actions artifact only.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Package version (default: 0.0.0+git.<short sha>)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    # 22.04's glibc 2.35 is the oldest the binary has to run on.
+    runs-on: ubuntu-22.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Version
+        id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then
+            version=${GITHUB_REF_NAME#v}
+          elif [ -n "${INPUT_VERSION}" ]; then
+            version=${INPUT_VERSION#v}
+          else
+            version=0.0.0+git.$(git rev-parse --short=7 HEAD)
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Version: $version"
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev \
+            libxi-dev libgl1-mesa-dev libasound2-dev \
+            lintian desktop-file-utils
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build -j
+
+      - name: Package
+        run: packaging/linux/make-packages.sh "${{ steps.version.outputs.version }}" build dist
+
+      - name: Check
+        run: |
+          desktop-file-validate packaging/linux/raylibdoom.desktop
+          lintian --version
+          lintian --fail-on error --display-info dist/*.deb
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: raylibdoom-${{ steps.version.outputs.version }}-linux-x86_64
+          path: dist/
+          if-no-files-found: error
+
+  # Install, run and remove the .deb on clean systems, to check that
+  # its Depends resolve on both LTS releases (24.04 renamed libasound2).
+  test:
+    needs: package
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ['ubuntu:22.04', 'ubuntu:24.04']
+    runs-on: ubuntu-latest
+    container: ${{ matrix.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: raylibdoom-${{ needs.package.outputs.version }}-linux-x86_64
+          path: dist
+
+      - name: Install, run, remove
+        run: sh packaging/linux/test-deb.sh dist/raylibdoom_*_amd64.deb
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: [package, test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: raylibdoom-${{ needs.package.outputs.version }}-linux-x86_64
+          path: dist
+
+      # The other OS release workflows run on the same tag and may
+      # create the draft at the same moment. Drafts are not tied to the
+      # tag, so a race can leave two; everyone uploads to the oldest,
+      # and a draft this job made that lost the race is deleted.
+      - name: Upload to the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          drafts() {
+            gh api --paginate "repos/$GH_REPO/releases" \
+              --jq ".[] | select(.tag_name == \"$TAG\") | .id" | sort -n
+          }
+          mine=
+          if [ -z "$(drafts)" ]; then
+            if url=$(gh release create "$TAG" --draft --verify-tag \
+                       --title "$TAG" --notes "raylib DOOM $TAG"); then
+              mine=$(gh api "repos/$GH_REPO/releases" \
+                       --jq ".[] | select(.html_url == \"$url\") | .id")
+            fi
+          fi
+          id=$(drafts | head -1)
+          [ -n "$id" ] || { echo "no release for $TAG" >&2; exit 1; }
+          if [ -n "$mine" ] && [ "$mine" != "$id" ]; then
+            gh api -X DELETE "repos/$GH_REPO/releases/$mine"
+          fi
+          draft=$(gh api "repos/$GH_REPO/releases/$id" --jq .draft)
+          echo "Uploading to release $id (draft: $draft)"
+          for f in dist/*; do
+            name=$(basename "$f")
+            old=$(gh api "repos/$GH_REPO/releases/$id/assets" --paginate \
+                    --jq ".[] | select(.name == \"$name\") | .id")
+            [ -z "$old" ] || gh api -X DELETE "repos/$GH_REPO/releases/assets/$old"
+            gh api -X POST -H "Content-Type: application/octet-stream" \
+              "https://uploads.github.com/repos/$GH_REPO/releases/$id/assets?name=$name" \
+              --input "$f" --jq .browser_download_url
+          done
