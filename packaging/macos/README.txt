@@ -21,9 +21,20 @@ opened" or "cannot verify" it. To open it anyway, either:
     password or Touch ID and click "Open". From then on it opens
     normally.
 
-  - Or, in Terminal, remove the download quarantine flag:
+  - Or, in Terminal, remove the download quarantine flag from the
+    .dmg before you open it, then open it and drag the app as above:
+
+      xattr -d com.apple.quarantine ~/Downloads/raylibdoom-*-macos-arm64.dmg
+
+    If you already copied the app to Applications, remove the flag
+    from the app instead:
 
       xattr -dr com.apple.quarantine /Applications/raylibDOOM.app
+
+    If that fails with "Operation not permitted", macOS is protecting
+    installed apps from Terminal: allow Terminal under System
+    Settings > Privacy & Security > App Management, or use the .dmg
+    command above.
 
 The app is ad-hoc signed. It needs no special permissions.
 
