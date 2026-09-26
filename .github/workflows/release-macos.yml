@@ -1,0 +1,179 @@
+name: release-macos
+
+# A v* tag builds the Apple Silicon .dmg and uploads it to the draft
+# GitHub Release for the tag. workflow_dispatch, and pull requests
+# that change the macOS packaging, build it and keep it as an Actions
+# artifact only.
+#
+# Signing is ad-hoc until these repository secrets are added; then the
+# app and dmg are signed with the Developer ID and the dmg notarized:
+#   MACOS_CERT_P12        base64 of the Developer ID Application .p12
+#   MACOS_CERT_PASSWORD   its password
+#   MACOS_SIGN_IDENTITY   e.g. "Developer ID Application: Name (TEAMID)"
+#   MACOS_NOTARY_APPLE_ID, MACOS_NOTARY_TEAM_ID,
+#   MACOS_NOTARY_PASSWORD (an app-specific password)
+
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    paths:
+      - '.github/workflows/release-macos.yml'
+      - 'packaging/macos/**'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Package version (default: 0.0.0+git.<short sha>)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: macos-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Version
+        id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then
+            version=${GITHUB_REF_NAME#v}
+          elif [ -n "${INPUT_VERSION}" ]; then
+            version=${INPUT_VERSION#v}
+          else
+            version=0.0.0+git.$(git rev-parse --short=7 HEAD)
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Version: $version"
+
+      - name: Configure
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+
+      - name: Build
+        run: cmake --build build -j
+
+      - name: Import the signing certificate
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        if: env.MACOS_CERT_P12 != ''
+        run: |
+          keychain=$RUNNER_TEMP/signing.keychain-db
+          password=$(uuidgen)
+          echo "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" \
+            -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: \
+            -k "$password" "$keychain"
+          security list-keychains -d user -s "$keychain" \
+            $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/cert.p12"
+
+      - name: Package
+        env:
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          MACOS_NOTARY_APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
+          MACOS_NOTARY_TEAM_ID: ${{ secrets.MACOS_NOTARY_TEAM_ID }}
+          MACOS_NOTARY_PASSWORD: ${{ secrets.MACOS_NOTARY_PASSWORD }}
+        run: packaging/macos/make-dmg.sh "${{ steps.version.outputs.version }}" build dist
+
+      - name: Check
+        run: |
+          dmg=$(ls dist/*.dmg)
+          mnt=$(mktemp -d)
+          hdiutil attach -nobrowse -readonly -mountpoint "$mnt" "$dmg"
+          app=$mnt/raylibDOOM.app
+          ls -la "$mnt"
+          lipo -info "$app/Contents/MacOS/raylibdoom"
+          vtool -show-build "$app/Contents/MacOS/raylibdoom"
+          otool -L "$app/Contents/MacOS/raylibdoom"
+          plutil -p "$app/Contents/Info.plist"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          test "$(lipo -archs "$app/Contents/MacOS/raylibdoom")" = arm64
+          test "$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$app/Contents/Info.plist")" = 11.0
+          test -f "$app/Contents/Resources/raylibDOOM.icns"
+          test -L "$mnt/Applications"
+          test -f "$mnt/README.txt"
+          # With no IWAD anywhere, the app logs that (and shows a
+          # dialog, which nobody closes here).
+          home=$(mktemp -d)
+          HOME=$home DOOMWADDIR= "$app/Contents/MacOS/raylibdoom" -nosound \
+            > /dev/null 2>&1 < /dev/null &
+          pid=$!
+          sleep 10
+          kill $pid 2>/dev/null || true
+          cat "$home/Library/Logs/raylibDOOM.log"
+          grep -q 'No IWAD found' "$home/Library/Logs/raylibDOOM.log"
+          hdiutil detach "$mnt"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: raylibdoom-${{ steps.version.outputs.version }}-macos-arm64
+          path: dist/
+          if-no-files-found: error
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: raylibdoom-${{ needs.package.outputs.version }}-macos-arm64
+          path: dist
+
+      # The other OS release workflows run on the same tag and may
+      # create the draft at the same moment. Drafts are not tied to the
+      # tag, so a race can leave two; everyone uploads to the oldest,
+      # and a draft this job made that lost the race is deleted.
+      - name: Upload to the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          drafts() {
+            gh api --paginate "repos/$GH_REPO/releases" \
+              --jq ".[] | select(.tag_name == \"$TAG\") | .id" | sort -n
+          }
+          mine=
+          if [ -z "$(drafts)" ]; then
+            if url=$(gh release create "$TAG" --draft --verify-tag \
+                       --title "$TAG" --notes "raylib DOOM $TAG"); then
+              mine=$(gh api "repos/$GH_REPO/releases" \
+                       --jq ".[] | select(.html_url == \"$url\") | .id")
+            fi
+          fi
+          id=$(drafts | head -1)
+          [ -n "$id" ] || { echo "no release for $TAG" >&2; exit 1; }
+          if [ -n "$mine" ] && [ "$mine" != "$id" ]; then
+            gh api -X DELETE "repos/$GH_REPO/releases/$mine"
+          fi
+          draft=$(gh api "repos/$GH_REPO/releases/$id" --jq .draft)
+          echo "Uploading to release $id (draft: $draft)"
+          for f in dist/*; do
+            name=$(basename "$f")
+            old=$(gh api "repos/$GH_REPO/releases/$id/assets" --paginate \
+                    --jq ".[] | select(.name == \"$name\") | .id")
+            [ -z "$old" ] || gh api -X DELETE "repos/$GH_REPO/releases/assets/$old"
+            gh api -X POST -H "Content-Type: application/octet-stream" \
+              "https://uploads.github.com/repos/$GH_REPO/releases/$id/assets?name=$name" \
+              --input "$f" --jq .browser_download_url
+          done

@@ -44,6 +44,10 @@ target_link_libraries(raylibdoom PRIVATE raylib m)
 if(WIN32)
   target_link_libraries(raylibdoom PRIVATE ws2_32)
 endif()
+if(APPLE)
+  # i_main.c shows a dialog when raylibDOOM.app finds no IWAD.
+  target_link_libraries(raylibdoom PRIVATE "-framework CoreFoundation")
+endif()
 
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   # The 1993 code relies on signed overflow wrapping and on
