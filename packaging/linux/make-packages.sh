@@ -45,7 +45,9 @@ export SOURCE_DATE_EPOCH
 
 # The binary links only glibc; GLFW and miniaudio dlopen libX11,
 # libGL and libasound at run time. The libc6 version comes from the
-# newest glibc symbol version the binary uses.
+# newest glibc symbol version the binary uses. libasound2t64 goes
+# first: on 24.04 "libasound2" is only a virtual package, and apt
+# satisfies it with liboss4-salsa-asound2, which has no libasound.so.2.
 bin=$stage/raylibdoom
 cp "$build/raylibdoom" "$bin"
 strip --strip-unneeded --remove-section=.comment --remove-section=.note "$bin"
@@ -74,10 +76,13 @@ gzip -9n < "$here/README.txt" > "$doc/README.gz"
 
 date=$(date -u -R -d "@$SOURCE_DATE_EPOCH")
 maintainer="Raydelto Hernandez <raydelto@gmail.com>"
-gzip -9n > "$doc/changelog.Debian.gz" <<EOF
+# The version has no Debian revision, so this is a native package,
+# whose changelog is changelog.gz.
+gzip -9n > "$doc/changelog.gz" <<EOF
 raylibdoom ($version) unstable; urgency=medium
 
-  * Release $version. See https://github.com/raydelto/raylib_DOOM/releases
+  * Release $version.
+    https://github.com/raydelto/raylib_DOOM/releases
 
  -- $maintainer  $date
 EOF
@@ -90,7 +95,7 @@ Version: $version
 Architecture: amd64
 Maintainer: $maintainer
 Installed-Size: $size
-Depends: libc6 (>= $glibc), libgl1, libx11-6, libasound2 | libasound2t64
+Depends: libc6 (>= $glibc), libgl1, libx11-6, libasound2t64 | libasound2
 Recommends: libxcursor1, libxi6, libxinerama1, libxrandr2
 Suggests: freedoom
 Section: games
