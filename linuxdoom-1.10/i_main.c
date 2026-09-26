@@ -30,7 +30,6 @@ rcsid[] = "$Id: i_main.c,v 1.4 1997/02/03 22:45:10 b1 Exp $";
 
 #include "m_argv.h"
 #include "d_main.h"
-#include "i_win32.h"
 
 int
 main
@@ -39,10 +38,6 @@ main
 { 
     myargc = argc; 
     myargv = argv; 
-
-#ifdef _WIN32
-    I_Win32Init ();
-#endif
  
     D_DoomMain (); 
 

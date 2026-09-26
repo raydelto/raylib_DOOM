@@ -22,9 +22,9 @@
 
 #ifdef _WIN32
 
-// Default DOOMWADDIR to the executable's folder, and hide the
-// console window when started from Explorer.
-void I_Win32Init (void);
+// Before main(), i_win32.c defaults DOOMWADDIR to the executable's
+// folder and, when started from Explorer, hides the console window
+// and changes to that folder.
 
 // Show a fatal error in a message box if there is no console.
 void I_Win32ErrorBox (const char* message);

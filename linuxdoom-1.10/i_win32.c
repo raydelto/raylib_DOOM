@@ -17,7 +17,7 @@
 //
 //	Like i_raylib.c this file must not see the DOOM headers:
 //	<windows.h> defines its own "boolean". The rest of the game
-//	only calls the two functions declared in i_win32.h.
+//	only calls I_Win32ErrorBox, declared in i_win32.h.
 //
 //-----------------------------------------------------------------------------
 
@@ -34,7 +34,9 @@
 // stderr then goes nowhere, so I_Error shows a message box.
 static int consolehidden;
 
-void I_Win32Init (void)
+// Runs before main(), so i_main.c stays the same on every platform.
+__attribute__((constructor))
+static void I_Win32Init (void)
 {
     char	dir[MAX_PATH];
     char*	slash;
