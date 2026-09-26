@@ -7,8 +7,7 @@
 #
 # BUILD_DIR is the CMake build directory: the executable is taken from
 # there, and the raylib and GLFW licenses from the raylib source
-# FetchContent put in it. The MinGW-w64 runtime licenses come from the
-# MSYS2 installation that built it.
+# FetchContent put in it.
 
 set -eu
 
@@ -24,7 +23,6 @@ out=$(cd "$3" && pwd)
 here=$(cd "$(dirname "$0")" && pwd)
 top=$(cd "$here/../.." && pwd)
 raylib=$build/_deps/raylib-src
-licenses=${MINGW_PREFIX:-/mingw64}/share/licenses
 
 case $version in
     [0-9]*) ;;
@@ -32,9 +30,7 @@ case $version in
 esac
 
 for f in "$build/raylibdoom.exe" "$raylib/LICENSE" \
-         "$raylib/src/external/glfw/LICENSE.md" \
-         "$licenses/crt/COPYING.MinGW-w64-runtime.txt" \
-         "$licenses/gcc-libs/COPYING.RUNTIME"; do
+         "$raylib/src/external/glfw/LICENSE.md"; do
     [ -f "$f" ] || { echo "missing $f" >&2; exit 1; }
 done
 
@@ -75,9 +71,8 @@ crlf "$top/LICENSE.TXT" "$tree/LICENSE.TXT"
 crlf "$top/linuxdoom-1.10/opl3-LICENSE.txt" "$tree/opl3-LICENSE.txt"
 crlf "$raylib/LICENSE" "$tree/raylib-LICENSE.txt"
 crlf "$raylib/src/external/glfw/LICENSE.md" "$tree/glfw-LICENSE.md"
-crlf "$licenses/crt/COPYING.MinGW-w64-runtime.txt" \
-    "$tree/mingw-w64-runtime-LICENSE.txt"
-crlf "$licenses/gcc-libs/COPYING.RUNTIME" "$tree/gcc-RUNTIME-EXCEPTION.txt"
+crlf "$here/mingw-w64-runtime-LICENSE.txt" "$tree/mingw-w64-runtime-LICENSE.txt"
+crlf "$here/gcc-RUNTIME-EXCEPTION.txt" "$tree/gcc-RUNTIME-EXCEPTION.txt"
 
 find "$tree" -exec touch -d "@$SOURCE_DATE_EPOCH" {} +
 
