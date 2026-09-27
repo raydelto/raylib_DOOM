@@ -221,6 +221,11 @@ void I_InitGraphics(void)
 
     signal(SIGINT, I_SignalQuit);
 
+#ifdef __APPLE__
+    // The WADs are open; saved games go to Application Support.
+    I_BundleEnterDataDir();
+#endif
+
     // Window size, as a multiple of 320x240.
     scale = 3;
     if (M_CheckParm("-1"))

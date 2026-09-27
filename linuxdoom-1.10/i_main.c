@@ -49,6 +49,11 @@ rcsid[] = "$Id: i_main.c,v 1.4 1997/02/03 22:45:10 b1 Exp $";
 // ~/Library/Logs and says in a dialog when there is no IWAD.
 // Started as a plain binary it behaves as on Linux.
 
+// Application Support/raylibDOOM, set only inside raylibDOOM.app.
+static char		bundlesupport[PATH_MAX];
+
+extern char*		defaultfile;	// m_misc.c
+
 // Searched in this order within each directory, as in IdentifyVersion.
 static const char* bundleiwads[] =
 {
@@ -88,6 +93,21 @@ static int BundleFindIWAD (const char* dir, char* out)
     return 0;
 }
 
+// True if path is a WAD file with an IWAD header.
+static int BundleIsIWAD (const char* path)
+{
+    char	id[4];
+    FILE*	f;
+    int		ok;
+
+    f = fopen (path, "rb");
+    if (!f)
+	return 0;
+    ok = fread (id, 1, 4, f) == 4 && !memcmp (id, "IWAD", 4);
+    fclose (f);
+    return ok;
+}
+
 static void BundleAlert (const char* text)
 {
     CFStringRef	title;
@@ -106,7 +126,7 @@ static void BundleSetup (int argc, char** argv)
 {
     static char		exe[PATH_MAX];
     static char		appdir[PATH_MAX];
-    static char		support[PATH_MAX];
+    char*		support = bundlesupport;
     static char		iwad[PATH_MAX];
     static char		text[4*PATH_MAX];
     char		raw[PATH_MAX];
@@ -130,14 +150,15 @@ static void BundleSetup (int argc, char** argv)
     snprintf (appdir, sizeof(appdir), "%s", exe);
     *strrchr (appdir, '/') = '\0';
 
-    snprintf (support, sizeof(support), "%s/Library", home);
+    // Created now, but only entered once the WADs are open (see
+    // I_BundleEnterDataDir), so command-line paths and DOOMWADDIR
+    // stay relative to the caller's directory.
+    snprintf (support, PATH_MAX, "%s/Library", home);
     mkdir (support, 0700);
-    snprintf (support, sizeof(support), "%s/Library/Application Support", home);
+    snprintf (support, PATH_MAX, "%s/Library/Application Support", home);
     mkdir (support, 0755);
     strcat (support, "/raylibDOOM");
     mkdir (support, 0755);
-    if (chdir (support))
-	chdir (home);
 
     if (!isatty (STDERR_FILENO))
     {
@@ -151,10 +172,18 @@ static void BundleSetup (int argc, char** argv)
 	}
     }
 
-    // An IWAD named on the command line wins, as usual.
+    // An IWAD named on the command line wins, as usual: with -iwad,
+    // or as one of the -file WADs ("doom -file DOOM1.WAD"). PWADs
+    // alone still get the IWAD found here.
     for (i = 1; i < argc; i++)
-	if (!strcasecmp (argv[i], "-iwad") || !strcasecmp (argv[i], "-file"))
+    {
+	if (!strcasecmp (argv[i], "-iwad"))
 	    return;
+	if (!strcasecmp (argv[i], "-file"))
+	    while (i+1 < argc && argv[i+1][0] != '-')
+		if (BundleIsIWAD (argv[++i]))
+		    return;
+    }
 
     wadenv = getenv ("DOOMWADDIR");
     if (!BundleFindIWAD (wadenv, iwad)
@@ -183,6 +212,32 @@ static void BundleSetup (int argc, char** argv)
     args[argc+2] = NULL;
     myargc = argc + 2;
     myargv = args;
+}
+
+//
+// I_BundleEnterDataDir
+// Called when the WADs are open and the window is about to open.
+// From here on relative files (saved games, screenshots, recorded
+// demos) are in Application Support; a relative -config still means
+// the caller's directory.
+//
+void I_BundleEnterDataDir (void)
+{
+    static char		config[PATH_MAX];
+    char		cwd[PATH_MAX];
+
+    if (!bundlesupport[0])
+	return;
+
+    // M_SaveDefaults writes it again at quit.
+    if (defaultfile && defaultfile[0] != '/' && getcwd (cwd, sizeof(cwd)))
+    {
+	snprintf (config, sizeof(config), "%s/%s", cwd, defaultfile);
+	defaultfile = config;
+    }
+
+    if (chdir (bundlesupport))
+	fprintf (stderr, "Can't use %s for saved games\n", bundlesupport);
 }
 #endif
 

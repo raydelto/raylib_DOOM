@@ -1,7 +1,7 @@
 name: release-macos
 
-# A v* tag builds the Apple Silicon .dmg and uploads it to the draft
-# GitHub Release for the tag. workflow_dispatch, and pull requests
+# A pushed v* tag builds the Apple Silicon .dmg and uploads it to the
+# draft GitHub Release for the tag. workflow_dispatch, and pull requests
 # that change the macOS packaging, build it and keep it as an Actions
 # artifact only.
 #
@@ -20,6 +20,11 @@ on:
     paths:
       - '.github/workflows/release-macos.yml'
       - 'packaging/macos/**'
+      # The app's startup and linking.
+      - 'CMakeLists.txt'
+      - 'linuxdoom-1.10/i_main.c'
+      - 'linuxdoom-1.10/i_video.c'
+      - 'linuxdoom-1.10/i_system.h'
   workflow_dispatch:
     inputs:
       version:
@@ -127,53 +132,26 @@ jobs:
           path: dist/
           if-no-files-found: error
 
+  # Only a pushed tag publishes; workflow_dispatch stays artifact-only
+  # even when started on a tag.
   release:
-    if: github.ref_type == 'tag'
+    if: github.event_name == 'push' && github.ref_type == 'tag'
     needs: package
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: packaging/macos
+
       - uses: actions/download-artifact@v4
         with:
           name: raylibdoom-${{ needs.package.outputs.version }}-macos-arm64
           path: dist
 
-      # The other OS release workflows run on the same tag and may
-      # create the draft at the same moment. Drafts are not tied to the
-      # tag, so a race can leave two; everyone uploads to the oldest,
-      # and a draft this job made that lost the race is deleted.
       - name: Upload to the draft release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          TAG: ${{ github.ref_name }}
-        run: |
-          drafts() {
-            gh api --paginate "repos/$GH_REPO/releases" \
-              --jq ".[] | select(.tag_name == \"$TAG\") | .id" | sort -n
-          }
-          mine=
-          if [ -z "$(drafts)" ]; then
-            if url=$(gh release create "$TAG" --draft --verify-tag \
-                       --title "$TAG" --notes "raylib DOOM $TAG"); then
-              mine=$(gh api "repos/$GH_REPO/releases" \
-                       --jq ".[] | select(.html_url == \"$url\") | .id")
-            fi
-          fi
-          id=$(drafts | head -1)
-          [ -n "$id" ] || { echo "no release for $TAG" >&2; exit 1; }
-          if [ -n "$mine" ] && [ "$mine" != "$id" ]; then
-            gh api -X DELETE "repos/$GH_REPO/releases/$mine"
-          fi
-          draft=$(gh api "repos/$GH_REPO/releases/$id" --jq .draft)
-          echo "Uploading to release $id (draft: $draft)"
-          for f in dist/*; do
-            name=$(basename "$f")
-            old=$(gh api "repos/$GH_REPO/releases/$id/assets" --paginate \
-                    --jq ".[] | select(.name == \"$name\") | .id")
-            [ -z "$old" ] || gh api -X DELETE "repos/$GH_REPO/releases/assets/$old"
-            gh api -X POST -H "Content-Type: application/octet-stream" \
-              "https://uploads.github.com/repos/$GH_REPO/releases/$id/assets?name=$name" \
-              --input "$f" --jq .browser_download_url
-          done
+        run: packaging/macos/upload-release.sh "${{ github.ref_name }}" dist

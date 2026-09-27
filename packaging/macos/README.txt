@@ -74,7 +74,13 @@ The game binary takes the usual options:
   -fullscreen              start fullscreen; Alt+Enter toggles it
   -nosound, -nomusic       no audio / no music
   -iwad FILE               use FILE as the IWAD
+  -file FILE...            add PWADs (mods); the IWAD is still found
+                           as above unless one of the files is an IWAD
   -warp E M, -skill N      as in the original
+
+File names on the command line and in DOOMWADDIR are relative to the
+folder you run it from. Saved games, screenshots and recorded demos
+always go to ~/Library/Application Support/raylibDOOM.
 
 Files
 -----
