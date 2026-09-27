@@ -48,12 +48,14 @@ grep -q "/usr/share/games/doom" "$empty/out.txt"
 grep -q "freedoom" "$empty/out.txt"
 
 # IWAD search order, with stand-in IWADs: a WAD header and one E1M1
-# lump, no game data. The game picks one, then stops on the missing
-# lumps; " adding FILE" says which it picked.
+# lump, no game data (fakewad FILE PWAD makes a PWAD instead). The
+# game picks one, then stops on the missing lumps; " adding FILE" says
+# which it picked.
 echo "== IWAD search order"
 fakewad() {
     mkdir -p "$(dirname "$1")"
-    printf 'IWAD\001\000\000\000\014\000\000\000\000\000\000\000\000\000\000\000E1M1\000\000\000\000' > "$1"
+    printf '%s' "${2:-IWAD}" > "$1"
+    printf '\001\000\000\000\014\000\000\000\000\000\000\000\000\000\000\000E1M1\000\000\000\000' >> "$1"
 }
 picks() {
     want=$1; shift
@@ -61,12 +63,30 @@ picks() {
     echo "$* -> $got"
     [ "$got" = "$want" ] || { echo "expected $want" >&2; exit 1; }
 }
+# Like picks, but checks every file loaded, in order: the IWAD first,
+# then any -file WADs as PWADs.
+loads() {
+    want=$1; shift
+    got=$( (cd "$empty" && HOME=$empty "$@" -nosound 2>&1) | sed -n 's/^ adding //p' | tr '\n' ' ')
+    echo "$* -> $got"
+    [ "$got" = "$want " ] || { echo "expected $want" >&2; exit 1; }
+}
 fakewad /usr/share/games/doom/freedoom1.wad
 fakewad "$empty/mine/my.wad"
 fakewad "$empty/waddir/DOOM1.WAD"
+fakewad "$empty/mine/pwad.wad" PWAD
+mkdir -p "$empty/nowads"
 picks /usr/share/games/doom/freedoom1.wad env -u DOOMWADDIR /usr/games/raylibdoom
 picks mine/my.wad env -u DOOMWADDIR /usr/games/raylibdoom -file mine/my.wad
 picks "$empty/waddir/DOOM1.WAD" env DOOMWADDIR="$empty/waddir" /usr/games/raylibdoom
+# $DOOMWADDIR is searched before a -file IWAD, which then loads as a
+# PWAD; -file only wins over the system directories.
+loads "$empty/waddir/DOOM1.WAD mine/my.wad" \
+    env DOOMWADDIR="$empty/waddir" /usr/games/raylibdoom -file mine/my.wad
+loads "$empty/waddir/DOOM1.WAD mine/pwad.wad" \
+    env DOOMWADDIR="$empty/waddir" /usr/games/raylibdoom -file mine/pwad.wad
+loads "mine/my.wad" \
+    env DOOMWADDIR="$empty/nowads" /usr/games/raylibdoom -file mine/my.wad
 rm -rf /usr/share/games/doom
 
 echo "== remove"
