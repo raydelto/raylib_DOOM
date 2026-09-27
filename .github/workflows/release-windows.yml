@@ -115,8 +115,10 @@ jobs:
       - name: Test upload-to-draft.sh
         run: sh packaging/windows/test-upload-to-draft.sh
 
+  # Only a tag push publishes. workflow_dispatch, even on a tag, and
+  # pull_request only build the artifact.
   release:
-    if: github.ref_type == 'tag'
+    if: github.event_name == 'push' && github.ref_type == 'tag'
     needs: [package, upload-script-test]
     runs-on: ubuntu-latest
     permissions:
