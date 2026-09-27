@@ -1,0 +1,164 @@
+name: release-arch
+
+# Builds raylibdoom-<version>-1-x86_64.pkg.tar.zst for Arch Linux and
+# Omarchy with packaging/arch/PKGBUILD, in an archlinux:base-devel
+# container.
+#
+# A v* tag push uploads it to the draft GitHub Release for the tag.
+# workflow_dispatch and pull requests that change the packaging keep it
+# as an Actions artifact, unless workflow_dispatch is given the tag of
+# an existing draft release: then it builds that tag and attaches the
+# package to that draft. Published releases are never changed, and no
+# tag is ever created.
+
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    paths:
+      - '.github/workflows/release-arch.yml'
+      - 'packaging/arch/**'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing draft release tag to build and attach to (empty: artifact only)'
+        required: false
+        default: ''
+      version:
+        description: 'Package version when no tag is given (default: 0.0.0+git.<short sha>)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Install build tools
+        run: |
+          pacman -Syu --noconfirm --needed git cmake namcap desktop-file-utils
+          pacman -Q gcc cmake namcap
+
+      # A dispatch with a tag builds that tag; the checkout fails if the
+      # tag does not exist.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag != '' && format('refs/tags/{0}', inputs.tag) || '' }}
+          fetch-depth: 0
+
+      - name: Version
+        id: version
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then
+            version=${GITHUB_REF_NAME#v}
+          elif [ -n "${INPUT_TAG}" ]; then
+            case $INPUT_TAG in
+              v*) ;;
+              *) echo "not a v* tag: $INPUT_TAG" >&2; exit 1 ;;
+            esac
+            version=${INPUT_TAG#v}
+          elif [ -n "${INPUT_VERSION}" ]; then
+            version=${INPUT_VERSION#v}
+          else
+            version=0.0.0+git.$(git rev-parse --short=7 HEAD)
+          fi
+          # pkgver: no hyphen, colon, slash or whitespace.
+          if ! printf '%s\n' "$version" | grep -Eq '^[0-9][A-Za-z0-9.+_]*$'; then
+            echo "not a valid package version: $version" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Version: $version ($(git rev-parse HEAD))"
+
+      # makepkg refuses to run as root.
+      - name: Build
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          useradd -m builder
+          chown -R builder: "$GITHUB_WORKSPACE"
+          su builder -c "git config --global --add safe.directory '$GITHUB_WORKSPACE' &&
+                         packaging/arch/make-package.sh '$VERSION' dist"
+
+      - name: namcap
+        run: |
+          namcap packaging/arch/PKGBUILD | tee namcap.txt
+          namcap dist/*.pkg.tar.zst | tee -a namcap.txt
+          if grep -q ' E: ' namcap.txt; then
+            echo "namcap reported errors" >&2
+            exit 1
+          fi
+          desktop-file-validate packaging/linux/raylibdoom.desktop
+
+      # Install, run without an IWAD, and remove, on a clean Arch. The
+      # runner has no GPU or display, so the game is played on real
+      # hardware.
+      - name: Install, run, remove
+        run: |
+          pacman -U --noconfirm dist/*.pkg.tar.zst
+          pacman -Ql raylibdoom
+          test -x /usr/bin/raylibdoom
+          test -f /usr/share/applications/raylibdoom.desktop
+          test -f /usr/share/icons/hicolor/scalable/apps/raylibdoom.svg
+          test -f /usr/share/licenses/raylibdoom/LICENSE.TXT
+          ldd /usr/bin/raylibdoom
+          ! ldd /usr/bin/raylibdoom | grep -q 'not found'
+          empty=$(mktemp -d)
+          status=0
+          (cd "$empty" && HOME=$empty DOOMWADDIR=$empty raylibdoom) \
+            > "$empty/out.txt" 2>&1 || status=$?
+          cat "$empty/out.txt"
+          [ "$status" -ne 0 ]
+          grep -q "No IWAD found" "$empty/out.txt"
+          grep -q "/usr/share/games/doom" "$empty/out.txt"
+          pacman -R --noconfirm raylibdoom
+          test ! -e /usr/bin/raylibdoom
+          test ! -e /usr/share/applications/raylibdoom.desktop
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: raylibdoom-${{ steps.version.outputs.version }}-arch-x86_64
+          path: dist/
+          if-no-files-found: error
+
+  # The draft-release upload, against a fake gh: a published release is
+  # never changed and a dispatch never creates one. Runs on every
+  # trigger, before any real upload.
+  upload-script-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test upload-release.sh
+        run: sh packaging/arch/test-upload-release.sh
+
+  # A tag push, or a workflow_dispatch given a tag, uploads.
+  # upload-release.sh checks the event again and only adds to a draft.
+  release:
+    if: (github.event_name == 'push' && github.ref_type == 'tag') || (github.event_name == 'workflow_dispatch' && inputs.tag != '')
+    needs: [package, upload-script-test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: raylibdoom-${{ needs.package.outputs.version }}-arch-x86_64
+          path: dist
+
+      - name: Upload to the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+        run: sh packaging/arch/upload-release.sh "$TAG" dist/*

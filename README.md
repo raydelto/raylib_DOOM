@@ -79,6 +79,31 @@ keeps them as an Actions artifact. `sudo apt install ./raylibdoom_*.deb`
 installs `/usr/games/raylibdoom` with a menu entry;
 `sudo apt install freedoom` adds free IWADs it finds.
 
+### Arch Linux and Omarchy
+
+`.github/workflows/release-arch.yml` builds
+`raylibdoom-<version>-1-x86_64.pkg.tar.zst` with
+`packaging/arch/PKGBUILD` in an `archlinux:base-devel` container, and
+checks it with `namcap`. Pushing a `v*` tag uploads it to the draft
+release; running the workflow by hand keeps it as an Actions artifact,
+unless it is given the tag of an existing draft release, which it then
+builds and adds the package to. Install it with
+`sudo pacman -U raylibdoom-*.pkg.tar.zst`: it puts `/usr/bin/raylibdoom`
+in the app launcher, and the game finds IWADs copied to
+`/usr/share/games/doom`. `sudo pacman -R raylibdoom` removes it. As
+committed, the PKGBUILD builds the release tarball of its `pkgver` and
+can go to the AUR.
+
+On Hyprland the game runs through XWayland. The window tiles like any
+other; to float it at its own size instead, add a window rule for the
+class `DOOM` (in Omarchy's Lua config,
+`o.window("DOOM", { float = true, center = true })`). Alt+Enter
+toggles borderless fullscreen; `-fullscreen` starts that way. If another
+window on the workspace is fullscreen, Omarchy hands fullscreen to the
+new window, so the game can open fullscreen then. While you play the
+mouse is captured and the pointer hidden; in menus, when paused, and
+when the window loses focus, it is released.
+
 ## Running
 
 Put an IWAD (`doom1.wad`, `doom.wad`, `doom2.wad`, `plutonia.wad`,
