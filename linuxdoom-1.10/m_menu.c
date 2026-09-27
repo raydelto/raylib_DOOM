@@ -1747,8 +1747,9 @@ void M_Drawer (void)
     static short	y;
     short		i;
     short		max;
-    char		string[40];
+    char		string[80];
     int			start;
+    int			len;
 
     inhelpscreens = false;
 
@@ -1763,15 +1764,20 @@ void M_Drawer (void)
 	    for (i = 0;i < strlen(messageString+start);i++)
 		if (*(messageString+start+i) == '\n')
 		{
-		    memset(string,0,40);
-		    strncpy(string,messageString+start,i);
+		    // Lines can be longer than the original 40 bytes: a
+		    // missing comma in endmsg[] joins two quit messages.
+		    len = i < sizeof(string)-1 ? i : sizeof(string)-1;
+		    memcpy(string,messageString+start,len);
+		    string[len] = 0;
 		    start += i+1;
 		    break;
 		}
 				
 	    if (i == strlen(messageString+start))
 	    {
-		strcpy(string,messageString+start);
+		len = i < sizeof(string)-1 ? i : sizeof(string)-1;
+		memcpy(string,messageString+start,len);
+		string[len] = 0;
 		start += i;
 	    }
 				
