@@ -686,9 +686,9 @@ static boolean UseIWAD (char* path)
 
 
 // The IWADs looked for, best first, and the directories looked in:
-// $DOOMWADDIR, the current directory, then the system-wide
-// directories where distribution packages (freedoom,
-// game-data-packager) install IWADs.
+// $DOOMWADDIR and the current directory, then, on Linux and only
+// after an IWAD given with -file, the system-wide directories where
+// distribution packages (freedoom, game-data-packager) install IWADs.
 typedef struct
 {
     char*	name;
@@ -714,19 +714,23 @@ static char* iwaddirs[] =
 {
     NULL,	// $DOOMWADDIR
     ".",
+#ifdef __linux__
     "/usr/local/share/games/doom",
     "/usr/share/games/doom",
+#endif
 };
 
 #define NUMIWADNAMES	(sizeof(iwadnames)/sizeof(iwadnames[0]))
 #define NUMIWADDIRS	(sizeof(iwaddirs)/sizeof(iwaddirs[0]))
+#define NUMUSERDIRS	2	// $DOOMWADDIR and "."
 
 
 //
 // FindIWAD
-// Loads the best IWAD in the first directory that has one.
+// Loads the best IWAD in the first of iwaddirs[first..last-1]
+// that has one.
 //
-static boolean FindIWAD (void)
+static boolean FindIWAD (int first, int last)
 {
     int		d;
     int		i;
@@ -734,7 +738,7 @@ static boolean FindIWAD (void)
 
     iwaddirs[0] = getenv ("DOOMWADDIR");
 
-    for (d = 0; d < NUMIWADDIRS; d++)
+    for (d = first; d < last; d++)
     {
 	if (!iwaddirs[d] || !iwaddirs[d][0])
 	    continue;
@@ -831,7 +835,7 @@ void IdentifyVersion (void)
 	return;
     }
 
-    if (FindIWAD ())
+    if (FindIWAD (0, NUMUSERDIRS))
 	return;
 
     // An IWAD given with -file, as in "doom -file DOOM1.WAD".
@@ -842,6 +846,9 @@ void IdentifyVersion (void)
 	    if (UseIWAD (myargv[p]))
 		return;
     }
+
+    if (FindIWAD (NUMUSERDIRS, NUMIWADDIRS))
+	return;
 
     fprintf (stderr,
 	     "\nNo IWAD found. DOOM needs its game data: a file such as\n"

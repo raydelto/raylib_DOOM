@@ -21,8 +21,9 @@ upper- or mixed-case names such as DOOM1.WAD are found too:
 
   1. the directory named by the DOOMWADDIR environment variable
   2. the current directory
-  3. /usr/local/share/games/doom
-  4. /usr/share/games/doom
+  3. an IWAD named with -file (raylibdoom -file DOOM1.WAD)
+  4. /usr/local/share/games/doom
+  5. /usr/share/games/doom
 
 On Debian and Ubuntu, "sudo apt install freedoom" installs Freedoom into
 /usr/share/games/doom, where the game finds it. To use an IWAD under any

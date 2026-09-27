@@ -68,8 +68,7 @@ installs `/usr/games/raylibdoom` with a menu entry;
 
 Put an IWAD (`doom1.wad`, `doom.wad`, `doom2.wad`, `plutonia.wad`,
 `tnt.wad`, Freedoom's `freedoom1.wad` / `freedoom2.wad`, ...) in
-`$DOOMWADDIR`, the current directory, `/usr/local/share/games/doom` or
-`/usr/share/games/doom` (searched in that order), then:
+`$DOOMWADDIR` or the current directory, then:
 
 ```sh
 ./build/raylibdoom
@@ -84,7 +83,10 @@ identified from the maps it contains:
 ```
 
 An IWAD passed with `-file` (`-file DOOM1.WAD`) is also used as the IWAD.
-If no IWAD is found, the game says where it looked and exits.
+On Linux, the game then looks in `/usr/local/share/games/doom` and
+`/usr/share/games/doom`, where distribution packages such as `freedoom`
+install IWADs. If no IWAD is found, the game says where it looked and
+exits.
 
 | Option               | Effect                                    |
 | -------------------- | ----------------------------------------- |

@@ -47,6 +47,28 @@ grep -q "No IWAD found" "$empty/out.txt"
 grep -q "/usr/share/games/doom" "$empty/out.txt"
 grep -q "freedoom" "$empty/out.txt"
 
+# IWAD search order, with stand-in IWADs: a WAD header and one E1M1
+# lump, no game data. The game picks one, then stops on the missing
+# lumps; " adding FILE" says which it picked.
+echo "== IWAD search order"
+fakewad() {
+    mkdir -p "$(dirname "$1")"
+    printf 'IWAD\001\000\000\000\014\000\000\000\000\000\000\000\000\000\000\000E1M1\000\000\000\000' > "$1"
+}
+picks() {
+    want=$1; shift
+    got=$( (cd "$empty" && HOME=$empty "$@" -nosound 2>&1) | sed -n 's/^ adding //p' | head -1)
+    echo "$* -> $got"
+    [ "$got" = "$want" ] || { echo "expected $want" >&2; exit 1; }
+}
+fakewad /usr/share/games/doom/freedoom1.wad
+fakewad "$empty/mine/my.wad"
+fakewad "$empty/waddir/DOOM1.WAD"
+picks /usr/share/games/doom/freedoom1.wad env -u DOOMWADDIR /usr/games/raylibdoom
+picks mine/my.wad env -u DOOMWADDIR /usr/games/raylibdoom -file mine/my.wad
+picks "$empty/waddir/DOOM1.WAD" env DOOMWADDIR="$empty/waddir" /usr/games/raylibdoom
+rm -rf /usr/share/games/doom
+
 echo "== remove"
 apt-get purge -y raylibdoom
 if dpkg -s raylibdoom > /dev/null 2>&1; then
