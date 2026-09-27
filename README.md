@@ -92,7 +92,9 @@ builds and adds the package to. Install it with
 in the app launcher, and the game finds IWADs copied to
 `/usr/share/games/doom`. `sudo pacman -R raylibdoom` removes it. As
 committed, the PKGBUILD builds the release tarball of its `pkgver` and
-can go to the AUR.
+can go to the AUR. The Ubuntu `raylibdoom-<version>-linux-x86_64.tar.gz`
+runs on Omarchy too, unpacked anywhere, and is the fallback for other
+distributions.
 
 On Hyprland the game runs through XWayland. The window tiles like any
 other; to float it at its own size instead, add a window rule for the
