@@ -1,0 +1,66 @@
+# Maintainer: Raydelto Hernandez <raydelto@gmail.com>
+#
+# Builds raylibdoom-<version>-1-x86_64.pkg.tar.zst for Arch Linux and
+# Omarchy. As committed it builds the v$pkgver release tarball and can
+# go to the AUR as is; packaging/arch/make-package.sh builds the
+# checked-out commit with it instead.
+
+pkgname=raylibdoom
+pkgver=0.1.0
+pkgrel=1
+_raylibver=5.5
+pkgdesc='DOOM (1997 Linux source release) running on raylib'
+arch=('x86_64')
+url='https://github.com/raydelto/raylib_DOOM'
+license=('GPL-2.0-only' 'LGPL-2.1-or-later' 'Zlib' 'MIT' 'MIT-0' 'WTFPL'
+         'LicenseRef-Khronos')
+# raylib is linked in statically. Its GLFW and miniaudio dlopen X11,
+# OpenGL and the sound libraries at run time, so namcap cannot see
+# these in the ELF: libGL comes from libglvnd, the pointer is hidden
+# and captured through libXcursor and libXi, fullscreen uses libXrandr
+# and libXinerama, and the sound goes through ALSA (PipeWire with
+# pipewire-alsa) or PulseAudio (pipewire-pulse).
+depends=('glibc' 'libglvnd' 'libx11' 'libxcursor' 'libxi' 'libxinerama'
+         'libxrandr' 'alsa-lib' 'hicolor-icon-theme')
+optdepends=('pipewire-alsa: sound through PipeWire'
+            'libpulse: sound through PulseAudio or pipewire-pulse')
+makedepends=('cmake')
+options=('!debug')
+source=("raylib_DOOM-$pkgver.tar.gz::https://github.com/raydelto/raylib_DOOM/archive/refs/tags/v$pkgver.tar.gz"
+        "raylib-$_raylibver.tar.gz::https://github.com/raysan5/raylib/archive/refs/tags/$_raylibver.tar.gz")
+sha256sums=('d21f7c75de92bd0dd357ba06b0900b92b7e17b2ba20c9135aec249a541243dcb'
+            'aea98ecf5bc5c5e0b789a76de0083a21a70457050ea4cc2aec7566935f5e258e')
+
+build() {
+  # z_zone.c's error messages name their source file.
+  CFLAGS+=" -ffile-prefix-map=$srcdir=."
+  # raylib 5.5 from the source above, not Arch's raylib (6.x) and not a
+  # download at build time.
+  cmake -B build -S "raylib_DOOM-$pkgver" \
+    -DCMAKE_BUILD_TYPE=None \
+    -DCMAKE_DISABLE_FIND_PACKAGE_raylib=ON \
+    -DFETCHCONTENT_FULLY_DISCONNECTED=ON \
+    -DFETCHCONTENT_SOURCE_DIR_RAYLIB="$srcdir/raylib-$_raylibver" \
+    -Wno-dev
+  cmake --build build --target raylibdoom
+}
+
+package() {
+  local src="raylib_DOOM-$pkgver" linux="raylib_DOOM-$pkgver/packaging/linux"
+  local raylib="raylib-$_raylibver"
+
+  install -Dm755 build/raylibdoom "$pkgdir/usr/bin/raylibdoom"
+  install -Dm644 "$linux/raylibdoom.desktop" \
+    "$pkgdir/usr/share/applications/raylibdoom.desktop"
+  install -Dm644 "$linux/raylibdoom.svg" \
+    "$pkgdir/usr/share/icons/hicolor/scalable/apps/raylibdoom.svg"
+  install -Dm644 "$linux/raylibdoom.6" "$pkgdir/usr/share/man/man6/raylibdoom.6"
+  install -Dm644 "$linux/README.txt" "$pkgdir/usr/share/doc/raylibdoom/README.txt"
+
+  local lic="$pkgdir/usr/share/licenses/raylibdoom"
+  install -Dm644 "$src/LICENSE.TXT" "$lic/LICENSE.TXT"
+  install -Dm644 "$src/linuxdoom-1.10/opl3-LICENSE.txt" "$lic/opl3-LICENSE.txt"
+  install -Dm644 "$raylib/LICENSE" "$lic/raylib-LICENSE.txt"
+  install -Dm644 "$raylib/src/external/glfw/LICENSE.md" "$lic/glfw-LICENSE.md"
+  install -Dm644 "$linux/copyright" "$lic/THIRD-PARTY-NOTICES.txt"
+}
