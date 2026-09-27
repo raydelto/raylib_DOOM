@@ -39,6 +39,7 @@ static int TranslateSpecialKey (int index);
 
 static void WSL_Init (void);
 static void WSL_Shutdown (void);
+static void ToggleFullscreenWindow (void);
 
 // raylib's INFO chatter would drown DOOM's startup log.
 static void QuietRaylib (void)
@@ -80,7 +81,7 @@ void RL_InitVideo (int width, int height, int scale, int fullscreen)
     SetExitKey (KEY_NULL);
 
     if (fullscreen)
-	ToggleBorderlessWindowed ();
+	ToggleFullscreenWindow ();
 
     Image blank = GenImageColor (width, height, BLACK);
     screentex = LoadTextureFromImage (blank);
@@ -310,7 +311,7 @@ static void DrainPressedKeys (void)
 	    && (IsKeyDown (KEY_LEFT_ALT) || IsKeyDown (KEY_RIGHT_ALT)))
 	{
 	    // Alt+Enter toggles fullscreen, and is not passed on.
-	    ToggleBorderlessWindowed ();
+	    ToggleFullscreenWindow ();
 	    keystate[key] = 1;
 	    swallowed[key] = 1;
 	    continue;
@@ -700,6 +701,109 @@ static void WSL_Grab (int grab) {}
 static void WSL_FilterMotion (Vector2 pos, int* dx, int* dy) {}
 
 #endif
+
+
+
+//
+// HYPRLAND FULLSCREEN
+//
+// Hyprland (as on Omarchy) lays out tiled windows itself and ignores
+// the move and resize that raylib's borderless fullscreen asks for,
+// so Alt+Enter and -fullscreen did nothing there. Under Hyprland the
+// window manager is asked for fullscreen instead (_NET_WM_STATE on
+// X11, xdg-shell on Wayland), at the monitor's current mode so the
+// resolution never changes. Everywhere else nothing changes.
+//
+
+#ifdef __linux__
+
+typedef struct GLFWmonitor GLFWmonitor;
+
+typedef struct
+{
+    int			width;
+    int			height;
+    int			redbits;
+    int			greenbits;
+    int			bluebits;
+    int			refreshrate;
+} glfwvidmode_t;
+
+#define GLFW_AUTO_ICONIFY	0x00020006
+#define GLFW_DONT_CARE		-1
+
+extern GLFWmonitor** glfwGetMonitors (int* count)
+    __attribute__((weak));
+extern const glfwvidmode_t* glfwGetVideoMode (GLFWmonitor* monitor)
+    __attribute__((weak));
+extern void glfwSetWindowMonitor (GLFWwindow* window, GLFWmonitor* monitor,
+				  int xpos, int ypos, int width, int height,
+				  int refreshrate)
+    __attribute__((weak));
+extern void glfwSetWindowAttrib (GLFWwindow* window, int attrib, int value)
+    __attribute__((weak));
+
+static int		wmfullscreen;
+static Rectangle	wmwindowed;
+
+static int WM_ToggleFullscreen (void)
+{
+    GLFWwindow*			win;
+    GLFWmonitor**		monitors;
+    const glfwvidmode_t*	mode;
+    Vector2			pos;
+    int				count;
+    int				i;
+
+    if (!getenv ("HYPRLAND_INSTANCE_SIGNATURE")
+	|| !glfwGetMonitors || !glfwGetVideoMode
+	|| !glfwSetWindowMonitor || !glfwSetWindowAttrib)
+	return 0;
+
+    win = GetWindowHandle ();
+
+    if (wmfullscreen)
+    {
+	glfwSetWindowMonitor (win, NULL,
+			      (int)wmwindowed.x, (int)wmwindowed.y,
+			      (int)wmwindowed.width, (int)wmwindowed.height,
+			      GLFW_DONT_CARE);
+	wmfullscreen = 0;
+	return 1;
+    }
+
+    monitors = glfwGetMonitors (&count);
+    i = GetCurrentMonitor ();
+    if (!monitors || i < 0 || i >= count)
+	return 0;
+    mode = glfwGetVideoMode (monitors[i]);
+    if (!mode)
+	return 0;
+
+    pos = GetWindowPosition ();
+    wmwindowed = (Rectangle) { pos.x, pos.y,
+			       GetScreenWidth (), GetScreenHeight () };
+
+    // Stay fullscreen when focus moves to another window or workspace.
+    glfwSetWindowAttrib (win, GLFW_AUTO_ICONIFY, 0);
+    glfwSetWindowMonitor (win, monitors[i], 0, 0,
+			  mode->width, mode->height, mode->refreshrate);
+    wmfullscreen = 1;
+    return 1;
+}
+
+#else
+
+static int WM_ToggleFullscreen (void) { return 0; }
+
+#endif
+
+
+static void ToggleFullscreenWindow (void)
+{
+    if (!WM_ToggleFullscreen ())
+	ToggleBorderlessWindowed ();
+}
 
 
 
