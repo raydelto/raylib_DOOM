@@ -23,6 +23,14 @@ if [ "$1" = release ] && [ "$2" = create ]; then
         '. + [{id: $id, tag_name: $tag, draft: true, html_url: $url, assets: []}]' \
         "$MOCK/releases.json" > "$MOCK/new.json"
     mv "$MOCK/new.json" "$MOCK/releases.json"
+    echo "$id" > "$MOCK/created"
+    # Another OS job created an older draft at the same moment.
+    if [ -e "$MOCK/race" ]; then
+        jq --arg tag "$3" \
+            '. + [{id: 1, tag_name: $tag, draft: true, html_url: "u1", assets: []}]' \
+            "$MOCK/releases.json" > "$MOCK/new.json"
+        mv "$MOCK/new.json" "$MOCK/releases.json"
+    fi
     echo "$url"
     exit 0
 fi
@@ -53,6 +61,10 @@ case $path in
         # Published by a maintainer after the listing.
         [ ! -e "$MOCK/published-now" ] || { echo false; exit 0; }
         id=${path##*/}
+        # The release this job created was published after the listing.
+        if [ -e "$MOCK/mine-published" ] && [ "$id" = "$(cat "$MOCK/created")" ]; then
+            echo false; exit 0
+        fi
         jq -r --argjson id "$id" '.[] | select(.id == $id)' \
             "$MOCK/releases.json" | jq -r "$filter" ;;
     *) echo "fake gh: unexpected $path" >&2; exit 1 ;;
@@ -63,14 +75,15 @@ echo zip > "$work/raylibdoom-1.0.0-windows-x64.zip"
 
 failures=0
 
-# run NAME EXPECTED_EXIT RELEASES_JSON [FLAG]: runs the script for tag
-# v1.0.0 and leaves the recorded calls in $MOCK/calls. FLAG is a file
-# that changes the fake's behaviour (api-fails, published-now).
+# run NAME EXPECTED_EXIT RELEASES_JSON [FLAGS]: runs the script for tag
+# v1.0.0 and leaves the recorded calls in $MOCK/calls. FLAGS are files
+# that change the fake's behaviour (api-fails, published-now, race,
+# mine-published).
 run() {
     MOCK=$work/$1
     mkdir "$MOCK"
     : > "$MOCK/calls"
-    [ -z "${4:-}" ] || : > "$MOCK/$4"
+    for flag in ${4:-}; do : > "$MOCK/$flag"; done
     printf '%s\n' "$3" > "$MOCK/releases.json"
     set +e
     MOCK=$MOCK PATH="$work/bin:$PATH" GH_REPO=o/r \
@@ -132,6 +145,21 @@ check two-drafts '-X DELETE' 0
 # The draft is published between the listing and the upload.
 run published-meanwhile 1 "[{\"id\": 10, \"tag_name\": \"v1.0.0\", \"draft\": true, \"html_url\": \"u10\", \"assets\": [$asset]}]" published-now
 no_writes published-meanwhile
+
+# This job creates a draft (6) but another job's older draft (1) wins:
+# the upload goes to 1 and our duplicate is deleted.
+run lost-race 0 "[$other]" race
+check lost-race 'release create v1.0.0 --draft' 1
+check lost-race '-X DELETE repos/o/r/releases/6$' 1
+check lost-race 'releases/1/assets?name=' 1
+check lost-race 'releases/6/assets?name=' 0
+
+# Same, but our duplicate was published before the cleanup: it is left
+# alone, and the upload still goes to the remaining draft.
+run lost-race-published 0 "[$other]" "race mine-published"
+check lost-race-published '-X DELETE repos/o/r/releases/6' 0
+check lost-race-published 'releases/1/assets?name=' 1
+check lost-race-published 'releases/6/assets?name=' 0
 
 # The listing fails: that is not "no release", so nothing is created.
 run api-fails 1 "[]" api-fails

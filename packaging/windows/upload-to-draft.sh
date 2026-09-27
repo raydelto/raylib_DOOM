@@ -54,7 +54,13 @@ fi
 id=$(printf '%s\n' "$all" | awk '$2 == "true" { print $1; exit }')
 [ -n "$id" ] || { echo "no draft release for $tag" >&2; exit 1; }
 if [ -n "$mine" ] && [ "$mine" != "$id" ]; then
-    gh api -X DELETE "repos/$GH_REPO/releases/$mine"
+    # Ours, but only deleted while it is still a draft; if someone
+    # published it meanwhile, it is the maintainer's to clean up.
+    if [ "$(gh api "repos/$GH_REPO/releases/$mine" --jq .draft)" = true ]; then
+        gh api -X DELETE "repos/$GH_REPO/releases/$mine"
+    else
+        echo "release $mine that this job created is no longer a draft; leaving it" >&2
+    fi
 fi
 
 for f in "$@"; do
