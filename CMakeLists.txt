@@ -52,3 +52,18 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     -fwrapv -fno-strict-aliasing -Wall -Wno-unused-variable
     -Wno-unused-but-set-variable -Wno-unused-const-variable)
 endif()
+
+# Parser regression tests: cmake --build build && ctest --test-dir build
+enable_testing()
+add_executable(midi_register_test tests/midi_register_test.c ${DOOM_DIR}/opl3.c)
+target_include_directories(midi_register_test PRIVATE ${DOOM_DIR})
+target_compile_definitions(midi_register_test PRIVATE NORMALUNIX LINUX)
+target_link_libraries(midi_register_test PRIVATE m)
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang" AND NOT WIN32)
+  # No -fwrapv here: it would hide the signed-shift overflows that
+  # the sanitizer is meant to catch.
+  target_compile_options(midi_register_test PRIVATE
+    -fsanitize=undefined -fno-sanitize-recover=undefined)
+  target_link_options(midi_register_test PRIVATE -fsanitize=undefined)
+endif()
+add_test(NAME midi_register COMMAND midi_register_test)

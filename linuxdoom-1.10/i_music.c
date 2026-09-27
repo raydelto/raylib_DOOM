@@ -1171,6 +1171,18 @@ static void MIDI_GenerateMusic (short* buffer, int frames)
 
 
 //
+// MIDI_ChunkLength
+// A big-endian 32-bit chunk length, read unsigned so that lengths
+// of 2 GB and up are not shifted into the sign bit.
+//
+static uint32_t MIDI_ChunkLength (const byte* p)
+{
+    return ((uint32_t) p[4] << 24) | ((uint32_t) p[5] << 16)
+	| ((uint32_t) p[6] << 8) | (uint32_t) p[7];
+}
+
+
+//
 // MIDI_Register
 // Finds the tracks of a Standard MIDI file. False if it isn't one
 // that can be played.
@@ -1178,19 +1190,20 @@ static void MIDI_GenerateMusic (short* buffer, int frames)
 static boolean MIDI_Register (const byte* data, int length)
 {
     const byte*	p = data;
-    const byte*	end = data + length;
-    int		headerlength;
-    int		chunklength;
+    const byte*	end;
+    uint32_t	headerlength;
+    uint32_t	chunklength;
     int		division;
 
-    if (length < 14 || memcmp (p, "MThd", 4))
+    if (!data || length < 14 || memcmp (p, "MThd", 4))
 	return false;
 
-    headerlength = (p[4] << 24) | (p[5] << 16) | (p[6] << 8) | p[7];
+    end = data + length;
+    headerlength = MIDI_ChunkLength (p);
     division = (p[12] << 8) | p[13];
 
     // SMPTE timing is not used by music lumps.
-    if (headerlength < 6 || headerlength > length - 8
+    if (headerlength < 6 || headerlength > (uint32_t) (length - 8)
 	|| division == 0 || (division & 0x8000))
 	return false;
 
@@ -1201,8 +1214,8 @@ static boolean MIDI_Register (const byte* data, int length)
     // Unknown chunks are skipped.
     while (end - p >= 8 && nummiditracks < MIDI_MAXTRACKS)
     {
-	chunklength = (p[4] << 24) | (p[5] << 16) | (p[6] << 8) | p[7];
-	if (chunklength < 0 || chunklength > end - p - 8)
+	chunklength = MIDI_ChunkLength (p);
+	if (chunklength > (uint32_t) (end - p - 8))
 	    chunklength = end - p - 8;	// truncated: play what is there
 
 	if (!memcmp (p, "MTrk", 4))
