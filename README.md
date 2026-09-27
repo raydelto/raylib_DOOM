@@ -38,6 +38,13 @@ CMake (`brew install cmake`), then build as above. raylib uses Cocoa
 and OpenGL, which ship with macOS; nothing else is needed. Works on
 Apple Silicon and Intel.
 
+The macOS release is a `.dmg` for Apple Silicon (macOS 11+), made by
+`.github/workflows/release-macos.yml` with `packaging/macos/make-dmg.sh`.
+Inside `raylibDOOM.app` the game looks for its IWAD in `$DOOMWADDIR`,
+`~/Library/Application Support/raylibDOOM` and the folder holding the
+app, saves games to that Application Support folder, and logs to
+`~/Library/Logs/raylibDOOM.log`; see `packaging/macos/README.txt`.
+
 ### Windows
 
 Build with MinGW-w64 GCC, for example from

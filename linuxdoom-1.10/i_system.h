@@ -88,6 +88,11 @@ void I_Tactile (int on, int off, int total);
 
 void I_Error (char *error, ...);
 
+#ifdef __APPLE__
+// i_main.c: inside raylibDOOM.app, enters Application Support.
+void I_BundleEnterDataDir (void);
+#endif
+
 
 #endif
 //-----------------------------------------------------------------------------
