@@ -21,6 +21,17 @@ Comment:
  (LICENSE.TXT); the older "DOOM Source Code License" file headers are
  superseded by it.
 
+Files: linuxdoom-1.10/i_music.c
+Copyright: 1993-1996 id Software, Inc.
+           2005-2014 Simon Howard
+           2026 raylib DOOM contributors
+License: GPL-2
+Comment:
+ The OPL music driver follows Chocolate Doom's i_oplmusic.c (DMX
+ frequency table, volume curve and voice allocation), which is
+ GPL-2 or later; combined with the id Software code it is used here
+ under GPL-2.
+
 Files: linuxdoom-1.10/opl3.c
        linuxdoom-1.10/opl3.h
 Copyright: 2013-2020 Nuke.YKT
