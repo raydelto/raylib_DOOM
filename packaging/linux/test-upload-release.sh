@@ -138,6 +138,19 @@ else
     fail "workflow_dispatch on a tag: rc=$rc"; cat "$work/state-dispatch/calls.log"
 fi
 
+# 1b. workflow_dispatch on a branch, the shape of a `tag` input dry
+#     run (checkout fetches the tag's source, but the workflow itself
+#     was dispatched on a branch ref): refuses too, before any gh
+#     call. This is what keeps a dry run of an already-released tag
+#     from ever reaching the release it names.
+run dispatch_tag_input workflow_dispatch branch '[]'
+if [ $rc -ne 0 ] && [ ! -s "$work/state-dispatch_tag_input/calls.log" ]; then
+    pass "workflow_dispatch with a tag input does not release"
+else
+    fail "workflow_dispatch with a tag input: rc=$rc"
+    cat "$work/state-dispatch_tag_input/calls.log"
+fi
+
 # 2. A branch push: refuses too.
 run branch push branch '[]'
 [ $rc -ne 0 ] && [ ! -s "$work/state-branch/calls.log" ] \

@@ -72,12 +72,17 @@ Settings go to `%USERPROFILE%\.doomrc` when `HOME` is not set.
 ### Ubuntu packages
 
 `.github/workflows/release-linux.yml` builds `raylibdoom_<version>_amd64.deb`
-and `raylibdoom-<version>-linux-x86_64.tar.gz` on Ubuntu 22.04 (they run on
-22.04, 24.04 and newer); the scripts are in `packaging/linux/`. Pushing a
-`v*` tag uploads them to the draft release; running the workflow by hand
-keeps them as an Actions artifact. `sudo apt install ./raylibdoom_*.deb`
-installs `/usr/games/raylibdoom` with a menu entry;
-`sudo apt install freedoom` adds free IWADs it finds.
+and `raylibdoom-<version>-linux-x86_64.tar.gz` on Ubuntu 22.04, and the
+same for arm64 (`_arm64.deb`, `-linux-aarch64.tar.gz`) natively on
+GitHub's `ubuntu-22.04-arm` runner, no cross-compiling or QEMU (they run
+on 22.04, 24.04 and newer, including JetPack 6 on Jetson boards); the
+scripts are in `packaging/linux/`. Pushing a `v*` tag uploads both
+architectures to the draft release; running the workflow by hand keeps
+them as an Actions artifact, and can also build an existing tag's
+source (the `tag` input) as an artifact only, without touching that
+tag's release. `sudo apt install ./raylibdoom_*.deb` installs
+`/usr/games/raylibdoom` with a menu entry; `sudo apt install freedoom`
+adds free IWADs it finds.
 
 ### Arch Linux and Omarchy
 
