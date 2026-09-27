@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=raylib DOOM
+GenericName=First-person shooter
+Comment=The 1997 Linux DOOM source release, running on raylib
+Exec=raylibdoom
+Icon=raylibdoom
+Terminal=false
+Categories=Game;ActionGame;
+Keywords=doom;fps;shooter;freedoom;
