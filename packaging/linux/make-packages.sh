@@ -3,8 +3,7 @@
 # raylibdoom-<version>-linux-<tar arch>.tar.gz, each with a .sha256
 # file, from an already built binary. The binary is native, never
 # cross-compiled, so the package architecture is taken from the
-# machine running this script (dpkg's, for the .deb; uname's, for the
-# tarball name), not from an argument.
+# machine running this script (uname's), not from an argument.
 #
 #   packaging/linux/make-packages.sh VERSION BUILD_DIR OUT_DIR
 #
@@ -27,11 +26,15 @@ here=$(cd "$(dirname "$0")" && pwd)
 top=$(cd "$here/../.." && pwd)
 raylib=$build/_deps/raylib-src
 
-deb_arch=$(dpkg --print-architecture)
-case $deb_arch in
-    amd64) tar_arch=x86_64 ;;
-    arm64) tar_arch=aarch64 ;;
-    *) echo "unsupported architecture: $deb_arch" >&2; exit 1 ;;
+# dpkg --print-architecture isn't used here: it reflects dpkg's
+# configured native architecture, which some arm64 CI images inherit
+# wrong (amd64) from a shared base image, even though the kernel and
+# the binary just built are genuinely aarch64. uname -m asks the
+# running kernel instead, which is never wrong for a native build.
+case $(uname -m) in
+    x86_64)  deb_arch=amd64 tar_arch=x86_64 ;;
+    aarch64) deb_arch=arm64 tar_arch=aarch64 ;;
+    *) echo "unsupported architecture: $(uname -m)" >&2; exit 1 ;;
 esac
 
 # A native Debian version: a digit, then letters, digits and . + ~.
