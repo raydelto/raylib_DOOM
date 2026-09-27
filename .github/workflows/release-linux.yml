@@ -49,10 +49,13 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
+      # The packaging (this job's remaining steps) comes from the
+      # revision this workflow runs on. A dispatch with a tag builds
+      # only the game's source from that tag, checked out separately
+      # below, in case the tag predates today's packaging.
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ inputs.tag || github.ref }}
 
       - name: Version
         id: version
@@ -60,9 +63,18 @@ jobs:
           INPUT_VERSION: ${{ inputs.version }}
           INPUT_TAG: ${{ inputs.tag }}
         run: |
+          source=
           if [ "${GITHUB_REF_TYPE}" = tag ]; then
             version=${GITHUB_REF_NAME#v}
           elif [ -n "${INPUT_TAG}" ]; then
+            case $INPUT_TAG in
+              v*) ;;
+              *) echo "not a v* tag: $INPUT_TAG" >&2; exit 1 ;;
+            esac
+            # Never creates the tag: it must already exist.
+            git rev-parse --verify -q "refs/tags/$INPUT_TAG^{commit}" > /dev/null ||
+              { echo "no tag $INPUT_TAG" >&2; exit 1; }
+            source=refs/tags/$INPUT_TAG
             version=${INPUT_TAG#v}
           elif [ -n "${INPUT_VERSION}" ]; then
             version=${INPUT_VERSION#v}
@@ -76,7 +88,8 @@ jobs:
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "Version: $version"
+          echo "source=$source" >> "$GITHUB_OUTPUT"
+          echo "Version: $version, source ${source:-HEAD}"
 
       - name: Install build dependencies
         run: |
@@ -89,8 +102,20 @@ jobs:
       - name: Test the release upload script
         run: sh packaging/linux/test-upload-release.sh
 
+      # A dispatch with a tag builds that tag's game source, not this
+      # revision's, in a separate worktree: an older tag can predate
+      # today's CMakeLists.txt or source layout.
+      - name: Checkout the release source
+        if: steps.version.outputs.source != ''
+        run: git worktree add release-src "${{ steps.version.outputs.source }}"
+
       - name: Configure
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+        env:
+          SOURCE: ${{ steps.version.outputs.source }}
+        run: |
+          src=.
+          [ -z "$SOURCE" ] || src=release-src
+          cmake -S "$src" -B build -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
         run: cmake --build build -j
