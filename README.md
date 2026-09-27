@@ -108,7 +108,10 @@ that off, or `DOOM_WSL_MOUSE=1` to force it.
   Sound Blaster: the MUS score drives an emulated OPL2 FM chip, with the
   instruments from the IWAD's `GENMIDI` lump and DMX's voice allocation,
   pitch table and volume curve. The title uses `D_INTROA`, the OPL
-  arrangement, like the DOS version.
+  arrangement, like the DOS version. Standard MIDI music lumps (as in
+  Freedoom and many PWADs) play through the same chip and voices.
+- `s_sound.c`, `i_sound.h`: `I_RegisterSong` also takes the lump
+  length, so MIDI files can be read safely.
 - `opl3.c` / `opl3.h`: [Nuked OPL3](https://github.com/nukeykt/Nuked-OPL3)
   1.8 by Nuke.YKT, unmodified, under the LGPL 2.1 or later
   (`opl3-LICENSE.txt`).
