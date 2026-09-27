@@ -39,9 +39,13 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
+      # makepkg also checks the runtime depends, so the PKGBUILD's
+      # depends are installed with the build tools.
       - name: Install build tools
         run: |
-          pacman -Syu --noconfirm --needed git cmake namcap desktop-file-utils
+          pacman -Syu --noconfirm --needed git cmake namcap desktop-file-utils \
+            libglvnd libx11 libxcursor libxi libxinerama libxrandr alsa-lib \
+            hicolor-icon-theme
           pacman -Q gcc cmake namcap
 
       # A dispatch with a tag builds that tag; the checkout fails if the
