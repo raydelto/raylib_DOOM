@@ -24,10 +24,11 @@ here=$(cd "$(dirname "$0")" && pwd)
 top=$(cd "$here/../.." && pwd)
 raylib=$build/_deps/raylib-src
 
-case $version in
-    [0-9]*) ;;
-    *) echo "version must start with a digit: $version" >&2; exit 2 ;;
-esac
+# A native Debian version: a digit, then letters, digits and . + ~.
+if ! printf '%s\n' "$version" | grep -Eq '^[0-9][A-Za-z0-9.+~]*$'; then
+    echo "not a valid package version: $version" >&2
+    exit 2
+fi
 
 for f in "$build/raylibdoom" "$raylib/LICENSE" \
          "$raylib/src/external/glfw/LICENSE.md"; do
