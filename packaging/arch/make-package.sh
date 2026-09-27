@@ -1,20 +1,24 @@
 #!/bin/sh
 # Builds raylibdoom-<version>-1-x86_64.pkg.tar.zst and its .sha256
-# from the checked-out commit, with packaging/arch/PKGBUILD. Run as a
+# from a commit of this repository (default HEAD), with this copy of
+# packaging/arch/PKGBUILD. Run as a
 # normal user (makepkg refuses root) with base-devel and cmake
 # installed. Extra makepkg options can be given in MAKEPKG_FLAGS.
 #
-#   packaging/arch/make-package.sh VERSION OUT_DIR
+#   packaging/arch/make-package.sh VERSION OUT_DIR [REVISION]
+#
+# REVISION is only the game's source, so a tag made before
+# packaging/arch/ existed builds with the PKGBUILD from here.
 #
 # The PKGBUILD downloads the v$pkgver release tarball. Here a copy of
-# it gets pkgver=VERSION and the checksum of a git archive of HEAD,
+# it gets pkgver=VERSION and the checksum of a git archive of REVISION,
 # which is put where makepkg looks before downloading. raylib is still
 # downloaded and checked against the PKGBUILD's checksum.
 
 set -eu
 
-if [ $# -ne 2 ]; then
-    echo "usage: $0 VERSION OUT_DIR" >&2
+if [ $# -lt 2 ] || [ $# -gt 3 ]; then
+    echo "usage: $0 VERSION OUT_DIR [REVISION]" >&2
     exit 2
 fi
 
@@ -23,6 +27,9 @@ mkdir -p "$2"
 out=$(cd "$2" && pwd)
 here=$(cd "$(dirname "$0")" && pwd)
 top=$(cd "$here/../.." && pwd)
+rev=$(git -C "$top" rev-parse --verify "${3:-HEAD}^{commit}") ||
+    { echo "no such revision: ${3:-HEAD}" >&2; exit 2; }
+echo "source: ${3:-HEAD} ($rev)"
 
 # pkgver: no hyphen, colon, slash or whitespace.
 if ! printf '%s\n' "$version" | grep -Eq '^[0-9][A-Za-z0-9.+_]*$'; then
@@ -33,12 +40,12 @@ fi
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
-: "${SOURCE_DATE_EPOCH:=$(git -C "$top" log -1 --format=%ct)}"
+: "${SOURCE_DATE_EPOCH:=$(git -C "$top" log -1 --format=%ct "$rev")}"
 export SOURCE_DATE_EPOCH
 
 tarball=raylib_DOOM-$version.tar.gz
 git -C "$top" archive --format=tar.gz --prefix="raylib_DOOM-$version/" \
-    -o "$work/$tarball" HEAD
+    -o "$work/$tarball" "$rev"
 sum=$(sha256sum "$work/$tarball" | cut -d' ' -f1)
 
 # The first sha256sums entry is the raylib_DOOM tarball.

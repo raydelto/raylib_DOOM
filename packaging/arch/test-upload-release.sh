@@ -157,17 +157,28 @@ for name, args in [('dispatch-no-tag', ('workflow_dispatch', 'branch', '')),
                    ('branch-push', ('push', 'branch', '')),
                    ('pull-request', ('pull_request', 'branch', ''))]:
     print(name, ev(*args))
-# A dispatch with a tag builds that tag, not the branch it ran on.
-ref = [s for s in jobs['package']['steps']
-       if s.get('uses', '').startswith('actions/checkout')][0]['with']['ref']
-print('checkout-ref', 'inputs.tag' in ref and 'refs/tags/' in ref)
+# A dispatch with a tag builds the game from that tag with the
+# packaging of the revision the workflow runs on: the checkout stays on
+# that revision, and the tag is passed to make-package.sh as the source.
+steps = jobs['package']['steps']
+co = [s for s in steps if s.get('uses', '').startswith('actions/checkout')][0]
+build = [s for s in steps if s.get('name') == 'Build'][0]
+version = [s for s in steps if s.get('name') == 'Version'][0]['run']
+print('checkout-ref', 'ref' not in co.get('with', {})
+      and 'steps.version.outputs.source' in build['env']['SOURCE']
+      and 'make-package.sh' in build['run'] and '$SOURCE' in build['run']
+      and 'source=refs/tags/$INPUT_TAG' in version)
+# ... and the older-tag build that exercises it runs on pull requests.
+old = [s for s in steps if s.get('name') == 'Build an older tag']
+print('old-tag-check', bool(old) and 'refs/tags/$OLD_TAG' in old[0]['run'])
 PY
 expect="dispatch-no-tag False
 dispatch-tag True
 tag-push True
 branch-push False
 pull-request False
-checkout-ref True"
+checkout-ref True
+old-tag-check True"
 if [ "$(cat "$work/cond.txt")" = "$expect" ]; then
     pass "release job runs only for a tag push or a dispatch with a tag"
 else
