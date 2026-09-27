@@ -1,9 +1,11 @@
 name: release-linux
 
-# A v* tag builds the Ubuntu x86_64 packages and uploads them to the
-# draft GitHub Release for the tag. workflow_dispatch, and pull
+# A v* tag builds the Ubuntu x86_64 and arm64 packages and uploads them
+# to the draft GitHub Release for the tag. workflow_dispatch, and pull
 # requests that change the packaging, build them and keep them as an
-# Actions artifact only.
+# Actions artifact only. workflow_dispatch can also build an existing
+# tag's source (input `tag`) as an artifact only, to try out packaging
+# changes against a tag that is already released.
 
 on:
   push:
@@ -18,17 +20,39 @@ on:
         description: 'Package version (default: 0.0.0+git.<short sha>)'
         required: false
         default: ''
+      tag:
+        description: >-
+          Existing tag to build (e.g. v0.1.0), with this run's
+          packaging. Artifact only: never uploaded to a release.
+        required: false
+        default: ''
 
 permissions:
   contents: read
 
 jobs:
   package:
-    # 22.04's glibc 2.35 is the oldest the binary has to run on.
-    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # 22.04's glibc 2.35 is the oldest the binary has to run on,
+          # on both architectures. ubuntu-22.04-arm is a native arm64
+          # runner: no cross-compiling, no QEMU.
+          - arch: amd64
+            tar_arch: x86_64
+            runner: ubuntu-22.04
+          - arch: arm64
+            tar_arch: aarch64
+            runner: ubuntu-22.04-arm
+    runs-on: ${{ matrix.runner }}
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
+      # The packaging (this job's remaining steps) comes from the
+      # revision this workflow runs on. A dispatch with a tag builds
+      # only the game's source from that tag, checked out separately
+      # below, in case the tag predates today's packaging.
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -37,9 +61,21 @@ jobs:
         id: version
         env:
           INPUT_VERSION: ${{ inputs.version }}
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
+          source=
           if [ "${GITHUB_REF_TYPE}" = tag ]; then
             version=${GITHUB_REF_NAME#v}
+          elif [ -n "${INPUT_TAG}" ]; then
+            case $INPUT_TAG in
+              v*) ;;
+              *) echo "not a v* tag: $INPUT_TAG" >&2; exit 1 ;;
+            esac
+            # Never creates the tag: it must already exist.
+            git rev-parse --verify -q "refs/tags/$INPUT_TAG^{commit}" > /dev/null ||
+              { echo "no tag $INPUT_TAG" >&2; exit 1; }
+            source=refs/tags/$INPUT_TAG
+            version=${INPUT_TAG#v}
           elif [ -n "${INPUT_VERSION}" ]; then
             version=${INPUT_VERSION#v}
           else
@@ -52,7 +88,8 @@ jobs:
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "Version: $version"
+          echo "source=$source" >> "$GITHUB_OUTPUT"
+          echo "Version: $version, source ${source:-HEAD}"
 
       - name: Install build dependencies
         run: |
@@ -65,8 +102,20 @@ jobs:
       - name: Test the release upload script
         run: sh packaging/linux/test-upload-release.sh
 
+      # A dispatch with a tag builds that tag's game source, not this
+      # revision's, in a separate worktree: an older tag can predate
+      # today's CMakeLists.txt or source layout.
+      - name: Checkout the release source
+        if: steps.version.outputs.source != ''
+        run: git worktree add release-src "${{ steps.version.outputs.source }}"
+
       - name: Configure
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+        env:
+          SOURCE: ${{ steps.version.outputs.source }}
+        run: |
+          src=.
+          [ -z "$SOURCE" ] || src=release-src
+          cmake -S "$src" -B build -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
         run: cmake --build build -j
@@ -84,30 +133,40 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: raylibdoom-${{ steps.version.outputs.version }}-linux-x86_64
+          name: raylibdoom-${{ steps.version.outputs.version }}-linux-${{ matrix.tar_arch }}
           path: dist/
           if-no-files-found: error
 
   # Install, run and remove the .deb on clean systems, to check that
-  # its Depends resolve on both LTS releases (24.04 renamed libasound2).
+  # its Depends resolve on both LTS releases (24.04 renamed libasound2),
+  # on both architectures. The Ubuntu images are multi-arch, so the
+  # container step pulls the arm64 variant natively on the arm64 runner.
   test:
     needs: package
     strategy:
       fail-fast: false
       matrix:
         image: ['ubuntu:22.04', 'ubuntu:24.04']
-    runs-on: ubuntu-latest
+        arch: [amd64, arm64]
+        include:
+          - arch: amd64
+            tar_arch: x86_64
+            runner: ubuntu-latest
+          - arch: arm64
+            tar_arch: aarch64
+            runner: ubuntu-22.04-arm
+    runs-on: ${{ matrix.runner }}
     container: ${{ matrix.image }}
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/download-artifact@v4
         with:
-          name: raylibdoom-${{ needs.package.outputs.version }}-linux-x86_64
+          name: raylibdoom-${{ needs.package.outputs.version }}-linux-${{ matrix.tar_arch }}
           path: dist
 
       - name: Install, run, remove
-        run: sh packaging/linux/test-deb.sh dist/raylibdoom_*_amd64.deb
+        run: sh packaging/linux/test-deb.sh dist/raylibdoom_*_${{ matrix.arch }}.deb
 
   # Only a tag push releases. workflow_dispatch, even on a tag, keeps
   # the packages as an artifact; upload-release.sh checks this again.
@@ -122,7 +181,8 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: raylibdoom-${{ needs.package.outputs.version }}-linux-x86_64
+          pattern: raylibdoom-${{ needs.package.outputs.version }}-linux-*
+          merge-multiple: true
           path: dist
 
       - name: Upload to the draft release

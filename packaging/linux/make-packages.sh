@@ -1,7 +1,9 @@
 #!/bin/sh
-# Builds raylibdoom_<version>_amd64.deb and
-# raylibdoom-<version>-linux-x86_64.tar.gz, each with a .sha256 file,
-# from an already built binary.
+# Builds raylibdoom_<version>_<deb arch>.deb and
+# raylibdoom-<version>-linux-<tar arch>.tar.gz, each with a .sha256
+# file, from an already built binary. The binary is native, never
+# cross-compiled, so the package architecture is taken from the
+# machine running this script (uname's), not from an argument.
 #
 #   packaging/linux/make-packages.sh VERSION BUILD_DIR OUT_DIR
 #
@@ -23,6 +25,17 @@ out=$(cd "$3" && pwd)
 here=$(cd "$(dirname "$0")" && pwd)
 top=$(cd "$here/../.." && pwd)
 raylib=$build/_deps/raylib-src
+
+# dpkg --print-architecture isn't used here: it reflects dpkg's
+# configured native architecture, which some arm64 CI images inherit
+# wrong (amd64) from a shared base image, even though the kernel and
+# the binary just built are genuinely aarch64. uname -m asks the
+# running kernel instead, which is never wrong for a native build.
+case $(uname -m) in
+    x86_64)  deb_arch=amd64 tar_arch=x86_64 ;;
+    aarch64) deb_arch=arm64 tar_arch=aarch64 ;;
+    *) echo "unsupported architecture: $(uname -m)" >&2; exit 1 ;;
+esac
 
 # A native Debian version: a digit, then letters, digits and . + ~.
 if ! printf '%s\n' "$version" | grep -Eq '^[0-9][A-Za-z0-9.+~]*$'; then
@@ -93,7 +106,7 @@ size=$(du -k -s --apparent-size "$deb/usr" | cut -f1)
 cat > "$deb/DEBIAN/control" <<EOF
 Package: raylibdoom
 Version: $version
-Architecture: amd64
+Architecture: $deb_arch
 Maintainer: $maintainer
 Installed-Size: $size
 Depends: libc6 (>= $glibc), libgl1, libx11-6, libasound2t64 | libasound2
@@ -118,13 +131,13 @@ chmod 0644 "$deb/DEBIAN/control" "$deb/DEBIAN/md5sums"
 find "$deb" -type d -exec chmod 0755 {} +
 find "$deb" -exec touch -h -d "@$SOURCE_DATE_EPOCH" {} +
 
-debfile=raylibdoom_${version}_amd64.deb
+debfile=raylibdoom_${version}_${deb_arch}.deb
 dpkg-deb --root-owner-group -Zxz --build "$deb" "$out/$debfile"
 
 
 # --- .tar.gz ------------------------------------------------------------
 
-name=raylibdoom-$version-linux-x86_64
+name=raylibdoom-$version-linux-$tar_arch
 tree=$stage/$name
 install -d "$tree"
 install -m 0755 "$bin" "$tree/raylibdoom"
