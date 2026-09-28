@@ -6,7 +6,7 @@
 # checked-out commit with it instead.
 
 pkgname=raylibdoom
-pkgver=0.1.0
+pkgver=0.1.1
 pkgrel=1
 _raylibver=5.5
 pkgdesc='DOOM (1997 Linux source release) running on raylib'
@@ -28,6 +28,9 @@ makedepends=('cmake')
 options=('!debug')
 source=("raylib_DOOM-$pkgver.tar.gz::https://github.com/raydelto/raylib_DOOM/archive/refs/tags/v$pkgver.tar.gz"
         "raylib-$_raylibver.tar.gz::https://github.com/raysan5/raylib/archive/refs/tags/$_raylibver.tar.gz")
+# The first checksum is the v$pkgver tarball's. It can only be taken
+# once the tag is pushed (run updpkgsums then); make-package.sh
+# replaces it with that of the revision it builds.
 sha256sums=('d21f7c75de92bd0dd357ba06b0900b92b7e17b2ba20c9135aec249a541243dcb'
             'aea98ecf5bc5c5e0b789a76de0083a21a70457050ea4cc2aec7566935f5e258e')
 
