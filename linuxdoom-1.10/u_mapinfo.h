@@ -81,6 +81,15 @@ int U_ParseMapName (const char* name, int* episode, int* map);
 // True when the level ends the game: EndPic, EndGame and so on.
 int U_EndsGame (umapinfo_t* mi);
 
+// The sky texture for a map, worked out from that map alone so
+// nothing carries over from the level before: UMAPINFO's
+// SkyTexture, else the IWAD's rule (SKY1-SKY4 by episode, or
+// by map number for DOOM II), else a PWAD episode's own SKYn,
+// else SKY1. exists() says whether a texture is loaded; a
+// SkyTexture or SKYn that is not loaded is passed over.
+const char* U_SkyTexture (int commercial, int episode, int map,
+			  int (*exists) (const char* name));
+
 void U_FreeMapInfo (void);
 
 #endif

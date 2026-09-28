@@ -157,6 +157,12 @@ par times, the next and secret levels, and the end text and picture:
 These WADs replace the IWAD's texture list, so Freedoom's own episodes
 may not load while one is added.
 
+Only part of UMAPINFO is supported (see the top of
+`linuxdoom-1.10/u_mapinfo.c`). `NoIntermission` is ignored, `EndCast`
+ends the game without the cast, `InterText` shows only on a level that
+ends the game, and a `BossAction` other than `clear` keeps the default
+boss behaviour.
+
 The picture is scaled to the window in two steps, first by a whole
 number with sharp pixels and then smoothly to the final size, so every
 pixel row comes out the same height. Alt+Enter toggles fullscreen. The

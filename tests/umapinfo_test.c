@@ -65,6 +65,62 @@ static const char broken[] =
     "map E1M1 { LevelName = \"ok\" }\n"
     "map E1M2 { LevelName \"missing equals\" }\n";
 
+// Textures the fake WAD set has: the IWAD's four skies and
+// SIGIL II's SKY6. No SKY5, no SKY9.
+static int SkyExists (const char* name)
+{
+    return !strcmp (name, "SKY1") || !strcmp (name, "SKY2")
+	|| !strcmp (name, "SKY3") || !strcmp (name, "SKY4")
+	|| !strcmp (name, "SKY6");
+}
+
+static const char skies[] =
+    "map E1M1 { SkyTexture = \"SKY3\" Next = \"E1M2\" }\n"
+    "map E1M3 { SkyTexture = \"NOSUCH\" }\n"
+    "map E6M1 { SkyTexture = \"SKY6\" }\n"
+    "map E4M8 { Next = \"E6M1\" }\n"
+    "map MAP05 { SkyTexture = \"SKY3\" }\n";
+
+// The sky must come from the level being entered, whatever
+// the one before had: a level walk that goes through maps
+// with and without SkyTexture, and across episodes.
+static void SkyTests (void)
+{
+    static const struct { int commercial, episode, map; const char* sky; } walk[] =
+    {
+	{0, 1, 1, "SKY3"},	// UMAPINFO override
+	{0, 1, 2, "SKY1"},	// E1M1 -> E1M2: back to E1's own
+	{0, 1, 3, "SKY1"},	// override names a missing texture
+	{0, 4, 8, "SKY4"},
+	{0, 6, 1, "SKY6"},	// E4M8 -> E6M1 across episodes
+	{0, 6, 2, "SKY6"},	// no entry: SIGIL II's SKY6 by number
+	{0, 2, 1, "SKY2"},	// and back to an IWAD episode
+	{0, 5, 1, "SKY1"},	// no SKY5 loaded
+	{0, 9, 1, "SKY1"},
+	{1, 0, 5, "SKY3"},	// DOOM II override
+	{1, 0, 6, "SKY1"},	// MAP05 -> MAP06: back to the default
+	{1, 0, 15, "SKY2"},
+	{1, 0, 25, "SKY3"},
+    };
+    int	i;
+
+    CHECK (U_ParseMapInfo (skies, (int)strlen (skies), "skies"));
+    for (i=0 ; i<(int)(sizeof(walk)/sizeof(walk[0])) ; i++)
+    {
+	const char*	sky = U_SkyTexture (walk[i].commercial, walk[i].episode,
+					    walk[i].map, SkyExists);
+
+	if (strcmp (sky, walk[i].sky))
+	{
+	    fprintf (stderr, "sky step %d (E%dM%d%s): got %s, want %s\n",
+		     i, walk[i].episode, walk[i].map,
+		     walk[i].commercial ? " commercial" : "", sky, walk[i].sky);
+	    failures++;
+	}
+    }
+    U_FreeMapInfo ();
+}
+
 int main (void)
 {
     umapinfo_t*	mi;
@@ -147,6 +203,8 @@ int main (void)
     U_FreeMapInfo ();
     CHECK (U_FindMap (6, 1) == NULL);
     CHECK (numumapepisodes == 0);
+
+    SkyTests ();
 
     if (failures)
     {

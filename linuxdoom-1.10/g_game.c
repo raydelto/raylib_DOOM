@@ -439,6 +439,15 @@ void G_BuildTiccmd (ticcmd_t* cmd)
 } 
  
 
+// For U_SkyTexture; says so when a UMAPINFO sky is missing.
+static int G_TextureExists (const char* name)
+{
+    if (R_CheckTextureNumForName ((char *)name) >= 0)
+	return 1;
+    fprintf (stderr, "G_DoLoadLevel: sky texture %s not found\n", name);
+    return 0;
+}
+
 //
 // G_DoLoadLevel 
 //
@@ -457,33 +466,14 @@ void G_DoLoadLevel (void)
 
     // DOOM determines the sky texture to be used
     // depending on the current episode, and the game version.
+    // It is worked out again for every level, so a UMAPINFO
+    // SkyTexture does not stay on the levels after it.
     // This used to test gamemode against pack_tnt and pack_plut
     // too, but those are missions: retail has pack_plut's value,
     // so Ultimate DOOM's E2-E4 got DOOM II's SKY1.
-    if (gamemode == commercial)
-    {
-	skytexture = R_TextureNumForName ("SKY3");
-	if (gamemap < 12)
-	    skytexture = R_TextureNumForName ("SKY1");
-	else
-	    if (gamemap < 21)
-		skytexture = R_TextureNumForName ("SKY2");
-    }
-    else
-    {
-	umapinfo_t*	mi = U_FindMap (gameepisode, gamemap);
-
-	if (mi && mi->skytexture[0])
-	{
-	    int	sky = R_CheckTextureNumForName (mi->skytexture);
-
-	    if (sky >= 0)
-		skytexture = sky;
-	    else
-		fprintf (stderr, "G_DoLoadLevel: UMAPINFO sky %s not found\n",
-			 mi->skytexture);
-	}
-    }
+    skytexture = R_TextureNumForName ((char *)
+	U_SkyTexture (gamemode == commercial, gameepisode, gamemap,
+		      G_TextureExists));
 
     levelstarttic = gametic;        // for time calculation
     
@@ -1554,45 +1544,7 @@ G_InitNew
  
     viewactive = true;
     
-    // set the sky map for the episode
-    if ( gamemode == commercial)
-    {
-	skytexture = R_TextureNumForName ("SKY3");
-	if (gamemap < 12)
-	    skytexture = R_TextureNumForName ("SKY1");
-	else
-	    if (gamemap < 21)
-		skytexture = R_TextureNumForName ("SKY2");
-    }
-    else
-	switch (episode) 
-	{ 
-	  case 1: 
-	    skytexture = R_TextureNumForName ("SKY1"); 
-	    break; 
-	  case 2: 
-	    skytexture = R_TextureNumForName ("SKY2"); 
-	    break; 
-	  case 3: 
-	    skytexture = R_TextureNumForName ("SKY3"); 
-	    break; 
-	  case 4:	// Special Edition sky
-	    skytexture = R_TextureNumForName ("SKY4");
-	    break;
-	  default:
-	    // PWAD episodes: their own SKYn if they have one;
-	    // UMAPINFO's SkyTexture wins in G_DoLoadLevel.
-	    {
-		char	name[9];
-
-		snprintf (name, sizeof(name), "SKY%d", episode);
-		skytexture = R_CheckTextureNumForName (name);
-		if (skytexture < 0)
-		    skytexture = R_TextureNumForName ("SKY1");
-	    }
-	    break;
-	} 
- 
+    // G_DoLoadLevel sets the sky, for this and every later level.
     G_DoLoadLevel (); 
 } 
  

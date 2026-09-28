@@ -13,9 +13,22 @@
 //	}
 //
 //	Keys are case-insensitive. Keys this engine has no use
-//	for (Label, Author, ...) are skipped. BossAction entries
-//	other than "clear" are skipped too: the default boss
-//	behaviour stays.
+//	for (Label, Author, ...) are skipped.
+//
+//	Used: LevelName, LevelPic, Next, NextSecret, Music,
+//	SkyTexture, ExitPic, EnterPic, ParTime, Episode, EndGame,
+//	EndPic, EndBunny, and InterText, InterTextSecret,
+//	InterBackdrop and InterMusic on a level that ends the game.
+//
+//	Parsed but not acted on yet:
+//	- NoIntermission: the stats screen is still shown.
+//	- EndCast: ends the game like EndGame, without the cast.
+//	- InterText on a level with a Next: not shown; only the
+//	  final level's text is.
+//	- BossAction other than "clear": the default boss
+//	  behaviour stays.
+//	Commercial (MAPxx) entries get LevelName, Music, SkyTexture,
+//	LevelPic, ExitPic, EnterPic and ParTime only.
 //
 //-----------------------------------------------------------------------------
 
@@ -482,6 +495,32 @@ umapinfo_t* U_FindMap (int episode, int map)
 	if (maps[i].episode == episode && maps[i].map == map)
 	    return &maps[i];
     return NULL;
+}
+
+const char* U_SkyTexture (int commercial, int episode, int map,
+			  int (*exists) (const char* name))
+{
+    static char	name[9];
+    umapinfo_t*	mi = U_FindMap (commercial ? 0 : episode, map);
+
+    if (mi && mi->skytexture[0] && exists (mi->skytexture))
+	return mi->skytexture;
+
+    if (commercial)
+	return map < 12 ? "SKY1" : map < 21 ? "SKY2" : "SKY3";
+
+    if (episode >= 1 && episode <= 4)
+    {
+	snprintf (name, sizeof(name), "SKY%d", episode);
+	return name;
+    }
+    if (episode > 4 && episode <= 9)
+    {
+	snprintf (name, sizeof(name), "SKY%d", episode);
+	if (exists (name))
+	    return name;
+    }
+    return "SKY1";
 }
 
 int U_EndsGame (umapinfo_t* mi)
