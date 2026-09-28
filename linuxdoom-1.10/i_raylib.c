@@ -40,6 +40,7 @@ static int TranslateSpecialKey (int index);
 static void WSL_Init (void);
 static void WSL_Shutdown (void);
 static void ToggleFullscreenWindow (void);
+static void WM_SettleWindowed (void);
 
 // raylib's INFO chatter would drown DOOM's startup log.
 static void QuietRaylib (void)
@@ -339,6 +340,8 @@ void RL_PumpEvents (void)
     if (WindowShouldClose ())
 	quitrequested = 1;
 #endif
+
+    WM_SettleWindowed ();
 
     // EndDrawing polls too and resets the pressed queue,
     // so grab what it collected before polling again.
@@ -705,14 +708,22 @@ static void WSL_FilterMotion (Vector2 pos, int* dx, int* dy) {}
 
 
 //
-// HYPRLAND FULLSCREEN
+// WINDOW MANAGER FULLSCREEN
 //
-// Hyprland (as on Omarchy) lays out tiled windows itself and ignores
-// the move and resize that raylib's borderless fullscreen asks for,
-// so Alt+Enter and -fullscreen did nothing there. Under Hyprland the
-// window manager is asked for fullscreen instead (_NET_WM_STATE on
-// X11, xdg-shell on Wayland), at the monitor's current mode so the
-// resolution never changes. Everywhere else nothing changes.
+// Some window managers do not let raylib's borderless fullscreen
+// cover the whole monitor:
+//
+// - Hyprland (as on Omarchy) lays out tiled windows itself and
+//   ignores the move and resize, so the game stayed tiled.
+// - GNOME's mutter keeps an undecorated window that is not
+//   fullscreen inside the work area, so the top bar and the dock
+//   stayed visible.
+//
+// There the window manager is asked for fullscreen instead
+// (_NET_WM_STATE on X11, xdg-shell on Wayland), at the monitor's
+// current mode so the resolution never changes. Everywhere else,
+// including WSL and a bare X server, nothing changes.
+// DOOM_WM_FULLSCREEN=0/1 overrides the detection.
 //
 
 #ifdef __linux__
@@ -745,6 +756,32 @@ extern void glfwSetWindowAttrib (GLFWwindow* window, int attrib, int value)
 
 static int		wmfullscreen;
 static Rectangle	wmwindowed;
+static int		wmsettle;	// polls left to check the restore
+static int		wmfullwidth;
+static int		wmfullheight;
+
+#define WMSETTLEPOLLS	70	// about two seconds of tics
+
+
+static int UseWMFullscreen (void)
+{
+    const char*	env;
+
+    env = getenv ("DOOM_WM_FULLSCREEN");
+    if (env && *env)
+	return atoi (env) != 0;
+
+    if (getenv ("HYPRLAND_INSTANCE_SIGNATURE"))
+	return 1;
+
+    // XDG_CURRENT_DESKTOP is a colon-separated list, "ubuntu:GNOME"
+    // on Ubuntu. WSLg never runs GNOME, but keep WSL out regardless.
+    env = getenv ("XDG_CURRENT_DESKTOP");
+    if (env && strstr (env, "GNOME") && !IsWSL ())
+	return 1;
+
+    return 0;
+}
 
 static int WM_ToggleFullscreen (void)
 {
@@ -755,7 +792,7 @@ static int WM_ToggleFullscreen (void)
     int				count;
     int				i;
 
-    if (!getenv ("HYPRLAND_INSTANCE_SIGNATURE")
+    if (!UseWMFullscreen ()
 	|| !glfwGetMonitors || !glfwGetVideoMode
 	|| !glfwSetWindowMonitor || !glfwSetWindowAttrib)
 	return 0;
@@ -769,6 +806,9 @@ static int WM_ToggleFullscreen (void)
 			      (int)wmwindowed.width, (int)wmwindowed.height,
 			      GLFW_DONT_CARE);
 	wmfullscreen = 0;
+	// Hyprland places the window itself; leave it alone there.
+	if (!getenv ("HYPRLAND_INSTANCE_SIGNATURE"))
+	    wmsettle = WMSETTLEPOLLS;
 	return 1;
     }
 
@@ -789,12 +829,47 @@ static int WM_ToggleFullscreen (void)
     glfwSetWindowMonitor (win, monitors[i], 0, 0,
 			  mode->width, mode->height, mode->refreshrate);
     wmfullscreen = 1;
+    wmsettle = 0;
+    wmfullwidth = mode->width;
+    wmfullheight = mode->height;
     return 1;
+}
+
+
+//
+// Leaving fullscreen, mutter fits the title bar inside the size
+// asked for, so the window came back a title bar shorter and lower
+// than before. Once the window manager has let go of the monitor
+// size, ask again for the old size and position; by then it is
+// laying out a normal decorated window and takes them as asked.
+//
+static void WM_SettleWindowed (void)
+{
+    Vector2	pos;
+
+    if (!wmsettle)
+	return;
+
+    wmsettle--;
+    if (wmsettle && GetScreenWidth () == wmfullwidth
+	&& GetScreenHeight () == wmfullheight)
+	return;		// not restored yet
+
+    wmsettle = 0;
+    pos = GetWindowPosition ();
+    if (GetScreenWidth () == (int)wmwindowed.width
+	&& GetScreenHeight () == (int)wmwindowed.height
+	&& (int)pos.x == (int)wmwindowed.x && (int)pos.y == (int)wmwindowed.y)
+	return;
+
+    SetWindowSize ((int)wmwindowed.width, (int)wmwindowed.height);
+    SetWindowPosition ((int)wmwindowed.x, (int)wmwindowed.y);
 }
 
 #else
 
 static int WM_ToggleFullscreen (void) { return 0; }
+static void WM_SettleWindowed (void) {}
 
 #endif
 
