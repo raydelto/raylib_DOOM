@@ -66,6 +66,8 @@ rcsid[] = "$Id: m_menu.c,v 1.7 1997/02/03 22:45:10 b1 Exp $";
 #include "sounds.h"
 
 #include "m_menu.h"
+#include "u_mapinfo.h"
+#include <stdio.h>
 
 
 
@@ -285,12 +287,22 @@ enum
     ep_end
 } episodes_e;
 
-menuitem_t EpisodeMenu[]=
+// Room for the IWAD's episodes plus UMAPINFO ones; eight
+// lines is what fits under the title. M_InitEpisodes fills it.
+#define MAXEPISODEITEMS	8
+
+menuitem_t EpisodeMenu[MAXEPISODEITEMS]=
 {
     {1,"M_EPI1", M_Episode,'k'},
     {1,"M_EPI2", M_Episode,'t'},
     {1,"M_EPI3", M_Episode,'i'},
     {1,"M_EPI4", M_Episode,'t'}
+};
+
+// Where each item starts: episode, map.
+static int	episodestart[MAXEPISODEITEMS][2] =
+{
+    {1,1}, {2,1}, {3,1}, {4,1}
 };
 
 menu_t  EpiDef =
@@ -904,7 +916,7 @@ void M_VerifyNightmare(int ch)
     if (ch != 'y')
 	return;
 		
-    G_DeferedInitNew(nightmare,epi+1,1);
+    G_DeferedInitNew(nightmare,episodestart[epi][0],episodestart[epi][1]);
     M_ClearMenus ();
 }
 
@@ -916,7 +928,7 @@ void M_ChooseSkill(int choice)
 	return;
     }
 	
-    G_DeferedInitNew(choice,epi+1,1);
+    G_DeferedInitNew(choice,episodestart[epi][0],episodestart[epi][1]);
     M_ClearMenus ();
 }
 
@@ -932,7 +944,8 @@ void M_Episode(int choice)
 
     // Yet another hack...
     if ( (gamemode == registered)
-	 && (choice > 2))
+	 && episodestart[choice][0] == 4
+	 && !G_MapExists (4, 1))
     {
       fprintf( stderr,
 	       "M_Episode: 4th episode requires UltimateDOOM\n");
@@ -1852,6 +1865,62 @@ void M_Ticker (void)
 
 
 //
+// M_InitEpisodes
+// Adds UMAPINFO episodes (SIGIL's E5, SIGIL II's E6) to the
+// menu, after the IWAD's unless a PWAD asked to clear them.
+//
+static void M_InitEpisodes (void)
+{
+    int		i, j;
+    int		iwadepisodes = EpiDef.numitems;
+
+    if (umapepisodesclear)
+	EpiDef.numitems = 0;
+
+    for (i=0 ; i<numumapepisodes ; i++)
+    {
+	umapepisode_t*	ep = &umapepisodes[i];
+
+	if (W_CheckNumForName (ep->patch) < 0)
+	{
+	    fprintf (stderr, "M_InitEpisodes: no %s graphic for E%dM%d\n",
+		     ep->patch, ep->episode, ep->map);
+	    continue;
+	}
+	if (!G_MapExists (ep->episode, ep->map))
+	    continue;
+
+	// Redefining one of the IWAD's episodes replaces it.
+	for (j=0 ; j<EpiDef.numitems ; j++)
+	    if (episodestart[j][0] == ep->episode
+		&& episodestart[j][1] == ep->map)
+		break;
+	if (j == MAXEPISODEITEMS)
+	{
+	    fprintf (stderr, "M_InitEpisodes: more than %d episodes, "
+		     "E%dM%d left out\n", MAXEPISODEITEMS,
+		     ep->episode, ep->map);
+	    continue;
+	}
+
+	EpisodeMenu[j].status = 1;
+	snprintf (EpisodeMenu[j].name, sizeof(EpisodeMenu[j].name),
+		  "%.8s", ep->patch);
+	EpisodeMenu[j].routine = M_Episode;
+	EpisodeMenu[j].alphaKey = ep->key;
+	episodestart[j][0] = ep->episode;
+	episodestart[j][1] = ep->map;
+	if (j == EpiDef.numitems)
+	    EpiDef.numitems++;
+    }
+
+    // "Episode = clear" with nothing usable after it.
+    if (!EpiDef.numitems)
+	EpiDef.numitems = iwadepisodes;
+}
+
+
+//
 // M_Init
 //
 void M_Init (void)
@@ -1892,9 +1961,11 @@ void M_Init (void)
       case registered:
 	// We need to remove the fourth episode.
 	EpiDef.numitems--;
+	M_InitEpisodes ();
 	break;
       case retail:
 	// We are fine.
+	M_InitEpisodes ();
       default:
 	break;
     }

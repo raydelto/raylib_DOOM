@@ -77,6 +77,7 @@ OBJS=				\
 		$(O)/r_things.o		\
 		$(O)/w_wad.o			\
 		$(O)/wi_stuff.o		\
+		$(O)/u_mapinfo.o		\
 		$(O)/v_video.o		\
 		$(O)/st_lib.o			\
 		$(O)/st_stuff.o		\

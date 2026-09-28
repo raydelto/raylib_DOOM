@@ -69,6 +69,7 @@ rcsid[] = "$Id: g_game.c,v 1.8 1997/02/03 22:45:09 b1 Exp $";
 
 
 #include "g_game.h"
+#include "u_mapinfo.h"
 
 
 // 64-bit structs are larger than the original 0x2c000 allowed for.
@@ -456,9 +457,10 @@ void G_DoLoadLevel (void)
 
     // DOOM determines the sky texture to be used
     // depending on the current episode, and the game version.
-    if ( (gamemode == commercial)
-	 || ( gamemode == pack_tnt )
-	 || ( gamemode == pack_plut ) )
+    // This used to test gamemode against pack_tnt and pack_plut
+    // too, but those are missions: retail has pack_plut's value,
+    // so Ultimate DOOM's E2-E4 got DOOM II's SKY1.
+    if (gamemode == commercial)
     {
 	skytexture = R_TextureNumForName ("SKY3");
 	if (gamemap < 12)
@@ -466,6 +468,21 @@ void G_DoLoadLevel (void)
 	else
 	    if (gamemap < 21)
 		skytexture = R_TextureNumForName ("SKY2");
+    }
+    else
+    {
+	umapinfo_t*	mi = U_FindMap (gameepisode, gamemap);
+
+	if (mi && mi->skytexture[0])
+	{
+	    int	sky = R_CheckTextureNumForName (mi->skytexture);
+
+	    if (sky >= 0)
+		skytexture = sky;
+	    else
+		fprintf (stderr, "G_DoLoadLevel: UMAPINFO sky %s not found\n",
+			 mi->skytexture);
+	}
     }
 
     levelstarttic = gametic;        // for time calculation
@@ -482,6 +499,13 @@ void G_DoLoadLevel (void)
 	memset (players[i].frags,0,sizeof(players[i].frags)); 
     } 
 		 
+    // Which map really loaded, for logs and bug reports.
+    if (gamemode == commercial)
+	printf ("G_DoLoadLevel: MAP%02d\n", gamemap);
+    else
+	printf ("G_DoLoadLevel: E%dM%d\n", gameepisode, gamemap);
+    fflush (stdout);
+
     P_SetupLevel (gameepisode, gamemap, 0, gameskill);    
     displayplayer = consoleplayer;		// view the guy you are playing    
     starttime = I_GetTime (); 
@@ -984,6 +1008,21 @@ int pars[4][10] =
     {0,90,45,90,150,90,90,165,30,135} 
 }; 
 
+//
+// G_MapExists
+// Whether ExMy is in the loaded WADs, so that PWAD episodes
+// such as SIGIL's E5 and SIGIL II's E6 can be played.
+//
+boolean G_MapExists (int episode, int map)
+{
+    char	name[9];
+
+    if (episode < 1 || episode > 9 || map < 1 || map > 9)
+	return false;
+    snprintf (name, sizeof(name), "E%dM%d", episode, map);
+    return W_CheckNumForName (name) >= 0;
+}
+
 // DOOM II Par Times
 int cpars[32] =
 {
@@ -1018,9 +1057,16 @@ void G_SecretExitLevel (void)
     gameaction = ga_completed; 
 } 
  
+// The map a secret exit was taken from, to return after
+// the secret level on episodes that have no fixed return map.
+static int	secretexitfrom;
+
 void G_DoCompleted (void) 
 { 
     int             i; 
+    umapinfo_t*	    mi = NULL;
+    char*	    mapnext = NULL;
+    int		    nextep, nextmap;
 	 
     gameaction = ga_nothing; 
  
@@ -1031,7 +1077,33 @@ void G_DoCompleted (void)
     if (automapactive) 
 	AM_Stop (); 
 	
-    if ( gamemode != commercial)
+    // UMAPINFO: an explicit Next / NextSecret decides where
+    // to go, and EndPic / EndGame end the game on any map.
+    if (gamemode != commercial)
+    {
+	mi = U_FindMap (gameepisode, gamemap);
+	if (mi && secretexit && mi->nextsecret[0])
+	    mapnext = mi->nextsecret;
+	else if (mi && mi->next[0])
+	    mapnext = mi->next;
+
+	if (mapnext
+	    && (!U_ParseMapName (mapnext, &nextep, &nextmap)
+		|| !G_MapExists (nextep, nextmap)))
+	{
+	    fprintf (stderr, "G_DoCompleted: UMAPINFO next map %s "
+		     "not found, ending the episode\n", mapnext);
+	    gameaction = ga_victory;
+	    return;
+	}
+	if (!mapnext && mi && U_EndsGame (mi))
+	{
+	    gameaction = ga_victory;
+	    return;
+	}
+    }
+
+    if ( gamemode != commercial && !mapnext)
 	switch(gamemap)
 	{
 	  case 8:
@@ -1045,7 +1117,7 @@ void G_DoCompleted (void)
 		
 //#if 0  Hmmm - why?
     if ( (gamemap == 8)
-	 && (gamemode != commercial) ) 
+	 && (gamemode != commercial) && !mapnext ) 
     {
 	// victory 
 	gameaction = ga_victory; 
@@ -1065,6 +1137,7 @@ void G_DoCompleted (void)
     wminfo.didsecret = players[consoleplayer].didsecret; 
     wminfo.epsd = gameepisode -1; 
     wminfo.last = gamemap -1;
+    wminfo.nextep = gameepisode -1;
     
     // wminfo.next is 0 biased, unlike gamemap
     if ( gamemode == commercial)
@@ -1083,10 +1156,18 @@ void G_DoCompleted (void)
 	      default: wminfo.next = gamemap;
 	    }
     }
+    else if (mapnext)
+    {
+	wminfo.nextep = nextep - 1;
+	wminfo.next = nextmap - 1;
+    }
     else
     {
 	if (secretexit) 
+	{
 	    wminfo.next = 8; 	// go to secret level 
+	    secretexitfrom = gamemap;
+	}
 	else if (gamemap == 9) 
 	{
 	    // returning from secret level 
@@ -1104,6 +1185,11 @@ void G_DoCompleted (void)
 	      case 4:
 		wminfo.next = 2;
 		break;
+	      default:
+		// PWAD episodes without UMAPINFO: back to
+		// the map after the one with the secret exit.
+		wminfo.next = secretexitfrom ? secretexitfrom : 0;
+		break;
 	    }                
 	} 
 	else 
@@ -1114,10 +1200,14 @@ void G_DoCompleted (void)
     wminfo.maxitems = totalitems; 
     wminfo.maxsecret = totalsecret; 
     wminfo.maxfrags = 0; 
-    if ( gamemode == commercial )
+    if (mi && mi->partime)
+	wminfo.partime = 35*mi->partime;
+    else if ( gamemode == commercial )
 	wminfo.partime = 35*cpars[gamemap-1]; 
-    else
+    else if (gameepisode <= 3)
 	wminfo.partime = 35*pars[gameepisode][gamemap]; 
+    else
+	wminfo.partime = 0;	// pars[] has no E4 or later
     wminfo.pnum = consoleplayer; 
  
     for (i=0 ; i<MAXPLAYERS ; i++) 
@@ -1173,6 +1263,8 @@ void G_WorldDone (void)
 void G_DoWorldDone (void) 
 {        
     gamestate = GS_LEVEL; 
+    if (gamemode != commercial)
+	gameepisode = wminfo.nextep+1;
     gamemap = wminfo.next+1; 
     G_DoLoadLevel (); 
     gameaction = ga_nothing; 
@@ -1390,30 +1482,37 @@ G_InitNew
     if (episode < 1)
       episode = 1; 
 
-    if ( gamemode == retail )
-    {
-      if (episode > 4)
-	episode = 4;
-    }
-    else if ( gamemode == shareware )
-    {
-      if (episode > 1) 
-	   episode = 1;	// only start episode 1 on shareware
-    }  
-    else
-    {
-      if (episode > 3)
-	episode = 3;
-    }
-    
-
-  
     if (map < 1) 
 	map = 1;
     
     if ( (map > 9)
 	 && ( gamemode != commercial) )
       map = 9; 
+
+    // Episodes past the IWAD's are fine when a PWAD brings
+    // the map (SIGIL is E5, SIGIL II is E6); say so otherwise
+    // rather than quietly starting another episode.
+    if ( gamemode == shareware )
+    {
+      if (episode > 1) 
+	   episode = 1;	// only start episode 1 on shareware
+    }  
+    else if ( gamemode == commercial )
+    {
+      if (episode > 3)
+	episode = 3;
+    }
+    else if ( !G_MapExists (episode, map) )
+    {
+      int	maxepisode = (gamemode == retail) ? 4 : 3;
+
+      if (episode > maxepisode)
+      {
+	fprintf (stderr, "G_InitNew: E%dM%d is not in the loaded WADs, "
+		 "starting E%dM%d\n", episode, map, maxepisode, map);
+	episode = maxepisode;
+      }
+    }
 		 
     M_ClearRandom (); 
 	 
@@ -1479,6 +1578,18 @@ G_InitNew
 	    break; 
 	  case 4:	// Special Edition sky
 	    skytexture = R_TextureNumForName ("SKY4");
+	    break;
+	  default:
+	    // PWAD episodes: their own SKYn if they have one;
+	    // UMAPINFO's SkyTexture wins in G_DoLoadLevel.
+	    {
+		char	name[9];
+
+		snprintf (name, sizeof(name), "SKY%d", episode);
+		skytexture = R_CheckTextureNumForName (name);
+		if (skytexture < 0)
+		    skytexture = R_TextureNumForName ("SKY1");
+	    }
 	    break;
 	} 
  

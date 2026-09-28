@@ -34,6 +34,9 @@ rcsid[] = "$Id: f_finale.c,v 1.5 1997/02/03 21:26:34 b1 Exp $";
 #include "v_video.h"
 #include "w_wad.h"
 #include "s_sound.h"
+#include "u_mapinfo.h"
+#include <stdio.h>
+#include <string.h>
 
 // Data.
 #include "dstrings.h"
@@ -85,6 +88,34 @@ char*	t6text = T6TEXT;
 char*	finaletext;
 char*	finaleflat;
 
+// The art screen after the text: a lump, or the bunny scroll.
+// -1 and false give the episode's own.
+static int	finaleendlump = -1;
+static boolean	finalebunny;
+
+// E5TEXT, E6TEXT...: the end text PWAD episodes carry as a
+// lump for ports that read it. "" if there is none.
+static char* F_EpisodeTextLump (int episode)
+{
+    static char*	text;
+    char		name[9];
+    int			lump;
+    int			len;
+
+    snprintf (name, sizeof(name), "E%dTEXT", episode);
+    lump = W_CheckNumForName (name);
+    if (lump < 0)
+	return "";
+
+    if (text)
+	Z_Free (text);
+    len = W_LumpLength (lump);
+    text = Z_Malloc (len + 1, PU_STATIC, 0);
+    W_ReadLump (lump, text);
+    text[len] = 0;
+    return text;
+}
+
 void	F_StartCast (void);
 void	F_CastTicker (void);
 boolean F_CastResponder (event_t *ev);
@@ -96,6 +127,8 @@ void	F_CastDrawer (void);
 void F_StartFinale (void)
 {
     gameaction = ga_nothing;
+    finaleendlump = -1;
+    finalebunny = false;
     gamestate = GS_FINALE;
     viewactive = false;
     automapactive = false;
@@ -111,7 +144,12 @@ void F_StartFinale (void)
       case registered:
       case retail:
       {
-	S_ChangeMusic(mus_victor, true);
+	extern boolean	secretexit;
+	umapinfo_t*	mi = U_FindMap (gameepisode, gamemap);
+
+	if (!mi || !mi->intermusic[0]
+	    || !S_ChangeMusicLump (mi->intermusic, true))
+	    S_ChangeMusic(mus_victor, true);
 	
 	switch (gameepisode)
 	{
@@ -132,8 +170,25 @@ void F_StartFinale (void)
 	    finaletext = e4text;
 	    break;
 	  default:
-	    // Ouch.
+	    // PWAD episodes (SIGIL's E5, SIGIL II's E6).
+	    finaleflat = "FLOOR4_8";
+	    finaletext = F_EpisodeTextLump (gameepisode);
 	    break;
+	}
+
+	// UMAPINFO overrides; InterText = clear gives "".
+	if (mi)
+	{
+	    if (secretexit && mi->intertextsecret)
+		finaletext = mi->intertextsecret;
+	    else if (mi->intertext)
+		finaletext = mi->intertext;
+	    if (mi->interbackdrop[0]
+		&& W_CheckNumForName (mi->interbackdrop) >= 0)
+		finaleflat = mi->interbackdrop;
+	    if (mi->endpic[0])
+		finaleendlump = W_CheckNumForName (mi->endpic);
+	    finalebunny = mi->endbunny;
 	}
 	break;
       }
@@ -187,7 +242,10 @@ void F_StartFinale (void)
     
     finalestage = 0;
     finalecount = 0;
-	
+
+    // Nothing to type out: straight to the art screen.
+    if (gamemode != commercial && !finaletext[0])
+	finalestage = 1;
 }
 
 
@@ -243,7 +301,7 @@ void F_Ticker (void)
 	finalecount = 0;
 	finalestage = 1;
 	wipegamestate = -1;		// force a wipe
-	if (gameepisode == 3)
+	if (gameepisode == 3 || finalebunny)
 	    S_StartMusic (mus_bunny);
     }
 }
@@ -707,6 +765,10 @@ void F_Drawer (void)
 
     if (!finalestage)
 	F_TextWrite ();
+    else if (finalebunny)
+	F_BunnyScroll ();
+    else if (finaleendlump >= 0)
+	V_DrawPatch (0,0,0,W_CacheLumpNum (finaleendlump,PU_CACHE));
     else
     {
 	switch (gameepisode)
@@ -729,6 +791,11 @@ void F_Drawer (void)
 	  case 4:
 	    V_DrawPatch (0,0,0,
 			 W_CacheLumpName("ENDPIC",PU_CACHE));
+	    break;
+	  default:
+	    V_DrawPatch (0,0,0,
+			 W_CacheLumpName(W_CheckNumForName("CREDIT") >= 0
+					 ? "CREDIT" : "HELP2",PU_CACHE));
 	    break;
 	}
     }

@@ -42,6 +42,7 @@ rcsid[] = "$Id: s_sound.c,v 1.6 1997/02/03 22:45:12 b1 Exp $";
 #include "p_local.h"
 
 #include "doomstat.h"
+#include "u_mapinfo.h"
 
 
 // Purpose?
@@ -203,6 +204,8 @@ void S_Start(void)
 {
   int cnum;
   int mnum;
+  umapinfo_t* mi;
+  char lumpname[9];
 
   // kill all playing sounds at start of level
   //  (trust me - a good idea)
@@ -212,6 +215,25 @@ void S_Start(void)
   
   // start new music for the level
   mus_paused = 0;
+
+  mi = U_FindMap (gamemode == commercial ? 0 : gameepisode, gamemap);
+  if (mi && mi->music[0] && S_ChangeMusicLump (mi->music, true))
+  {
+    nextcleanup = 15;
+    return;
+  }
+
+  // PWAD episodes past E4 without UMAPINFO: their D_ExMy
+  // if they ship one, else the E4 picks below.
+  if (gamemode != commercial && gameepisode > 4)
+  {
+    snprintf (lumpname, sizeof(lumpname), "D_E%dM%d", gameepisode, gamemap);
+    if (S_ChangeMusicLump (lumpname, true))
+    {
+      nextcleanup = 15;
+      return;
+    }
+  }
   
   if (gamemode == commercial)
     mnum = mus_runnin + gamemap - 1;
@@ -690,6 +712,40 @@ S_ChangeMusic
     I_PlaySong(music->handle, looping);
 
     mus_playing = music;
+}
+
+
+// S_music[] only knows the IWAD's songs; UMAPINFO can
+// name any lump, so it gets a slot of its own.
+static musicinfo_t	lumpmusic;
+
+int
+S_ChangeMusicLump
+( char*		lumpname,
+  int		looping )
+{
+    int		lumpnum = W_CheckNumForName (lumpname);
+
+    if (lumpnum < 0)
+    {
+	fprintf (stderr, "S_ChangeMusicLump: %s not found\n", lumpname);
+	return false;
+    }
+
+    if (mus_playing == &lumpmusic && lumpmusic.lumpnum == lumpnum)
+	return true;
+
+    S_StopMusic();
+
+    lumpmusic.name = "";
+    lumpmusic.lumpnum = lumpnum;
+    lumpmusic.data = W_CacheLumpNum(lumpnum, PU_MUSIC);
+    lumpmusic.handle = I_RegisterSong(lumpmusic.data,
+				      W_LumpLength(lumpnum));
+    I_PlaySong(lumpmusic.handle, looping);
+
+    mus_playing = &lumpmusic;
+    return true;
 }
 
 

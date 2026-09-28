@@ -49,14 +49,15 @@ planefunction_t		ceilingfunc;
 //
 
 // Here comes the obnoxious "visplane".
-#define MAXVISPLANES	128
+// Vanilla had 128; limit-removing PWADs (SIGIL II) need more.
+#define MAXVISPLANES	1024
 visplane_t		visplanes[MAXVISPLANES];
 visplane_t*		lastvisplane;
 visplane_t*		floorplane;
 visplane_t*		ceilingplane;
 
 // ?
-#define MAXOPENINGS	SCREENWIDTH*64
+#define MAXOPENINGS	SCREENWIDTH*256
 short			openings[MAXOPENINGS];
 short*			lastopening;
 
@@ -420,8 +421,7 @@ void R_DrawPlanes (void)
 	}
 	
 	// regular flat
-	ds_source = W_CacheLumpNum(firstflat +
-				   flattranslation[pl->picnum],
+	ds_source = W_CacheLumpNum(flatlumps[flattranslation[pl->picnum]],
 				   PU_STATIC);
 	
 	planeheight = abs(pl->height-viewz);

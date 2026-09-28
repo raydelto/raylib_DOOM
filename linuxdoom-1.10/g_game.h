@@ -35,6 +35,9 @@ void G_DeathMatchSpawnPlayer (int playernum);
 
 void G_InitNew (skill_t skill, int episode, int map);
 
+// Whether map ExMy is in the loaded WADs.
+boolean G_MapExists (int episode, int map);
+
 // Can be called by the startup code or M_Responder.
 // A normal game starts at map 1,
 // but a warp test can start elsewhere

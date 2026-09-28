@@ -73,6 +73,7 @@ static const char rcsid[] = "$Id: d_main.c,v 1.8 1997/02/03 22:45:09 b1 Exp $";
 #include "wi_stuff.h"
 #include "st_stuff.h"
 #include "am_map.h"
+#include "u_mapinfo.h"
 
 #include "p_setup.h"
 #include "r_local.h"
@@ -942,6 +943,32 @@ void FindResponseFile (void)
 
 
 //
+// D_LoadMapInfo
+// Parses every UMAPINFO lump, in load order, so a PWAD
+// given later on the command line overrides an earlier one.
+//
+static void D_LoadMapInfo (void)
+{
+    int		i;
+    int		found = 0;
+    char	source[32];
+
+    for (i=0 ; i<numlumps ; i++)
+    {
+	if (strncasecmp (lumpinfo[i].name, "UMAPINFO", 8))
+	    continue;
+	snprintf (source, sizeof(source), "lump %d", i);
+	U_ParseMapInfo (W_CacheLumpNum (i, PU_CACHE),
+			W_LumpLength (i), source);
+	found++;
+    }
+    if (found)
+	printf ("U_ParseMapInfo: %d UMAPINFO lump(s), %d episode(s) added.\n",
+		found, numumapepisodes);
+}
+
+
+//
 // D_DoomMain
 //
 void D_DoomMain (void)
@@ -1206,6 +1233,8 @@ void D_DoomMain (void)
 		    I_Error("\nThis is not the registered version.");
     }
     
+    D_LoadMapInfo ();
+
     // Iff additonal PWAD files are used, print modified banner
     if (modifiedgame)
     {

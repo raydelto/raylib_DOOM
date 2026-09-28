@@ -241,7 +241,7 @@ typedef struct
 #define MAXSWITCHES		50
 
  // 4 players, 4 buttons each at once, max.
-#define MAXBUTTONS		16
+#define MAXBUTTONS		64	// vanilla: 16
 
  // 1 second, in ticks. 
 #define BUTTONTIME      35             
@@ -303,7 +303,7 @@ typedef struct
 
 #define PLATWAIT		3
 #define PLATSPEED		FRACUNIT
-#define MAXPLATS		30
+#define MAXPLATS		256	// vanilla: 30
 
 
 extern plat_t*	activeplats[MAXPLATS];
@@ -515,7 +515,7 @@ typedef struct
 
 #define CEILSPEED		FRACUNIT
 #define CEILWAIT		150
-#define MAXCEILINGS		30
+#define MAXCEILINGS		256	// vanilla: 30
 
 extern ceiling_t*	activeceilings[MAXCEILINGS];
 
