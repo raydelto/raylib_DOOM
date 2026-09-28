@@ -408,6 +408,13 @@ R_PointToDist
 	dx = dy;
 	dy = temp;
     }
+
+    // A vertex right on the view point: FixedDiv (0,0) gives
+    // MAXINT, far past the end of tantoangle[]. DOS read
+    // garbage there; here it crashed, e.g. Freedoom's E2M1
+    // from the player start.
+    if (!dx)
+	return 0;
 	
     angle = (tantoangle[ FixedDiv(dy,dx)>>DBITS ]+ANG90) >> ANGLETOFINESHIFT;
 

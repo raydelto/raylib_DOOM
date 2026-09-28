@@ -208,6 +208,11 @@ typedef struct
 
     wbplayerstruct_t	plyr[MAXPLAYERS];
 
+    // episode of the next level, origin 0; differs from epsd
+    // only when UMAPINFO sends the player to another episode.
+    // Last, so -statcopy drivers keep their layout.
+    int		nextep;
+
 } wbstartstruct_t;
 
 

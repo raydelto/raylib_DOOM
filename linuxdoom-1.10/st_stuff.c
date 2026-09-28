@@ -700,12 +700,15 @@ ST_Responder (event_t* ev)
 	return false;
       
       // Ohmygod - this is not going to work.
+      // PWAD episodes (SIGIL's E5, ...) are fine if the map is there.
       if ((gamemode == retail)
-	  && ((epsd > 4) || (map > 9)))
+	  && ((epsd > 4) || (map > 9))
+	  && !G_MapExists (epsd, map))
 	return false;
 
       if ((gamemode == registered)
-	  && ((epsd > 3) || (map > 9)))
+	  && ((epsd > 3) || (map > 9))
+	  && !G_MapExists (epsd, map))
 	return false;
 
       if ((gamemode == shareware)

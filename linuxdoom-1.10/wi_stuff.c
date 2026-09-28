@@ -49,6 +49,7 @@ rcsid[] = "$Id: wi_stuff.c,v 1.7 1997/02/03 22:45:13 b1 Exp $";
 #include "v_video.h"
 
 #include "wi_stuff.h"
+#include "u_mapinfo.h"
 
 //
 // Data needed to add patches to full screen intermission pics.
@@ -395,6 +396,18 @@ static patch_t*		bp[MAXPLAYERS];
  // Name graphics of each level (centered)
 static patch_t**	lnames;
 
+// Episode (origin 0) of the level just finished, before
+// WI_initVariables remaps wbs->epsd.
+static int		lastep;
+
+// UMAPINFO pictures, as lump numbers; -1 when not given.
+static int		lastpiclump;
+static int		nextpiclump;
+static int		enterpiclump;
+
+// Whether to show the par time.
+static boolean		showpar;
+
 //
 // CODE
 //
@@ -418,16 +431,38 @@ boolean WI_Responder(event_t* ev)
 
 
 // Draws "<Levelname> Finished!"
+// The name graphic of the level just finished or the next
+// one: UMAPINFO's LevelPic, else WILVxy / CWILVxx. NULL when
+// a PWAD episode has neither.
+static patch_t* WI_levelName(boolean next)
+{
+    int	lump = next ? nextpiclump : lastpiclump;
+    int	map = next ? wbs->next : wbs->last;
+
+    if (lump >= 0)
+	return W_CacheLumpNum(lump, PU_CACHE);
+    if (next && wbs->nextep != lastep)
+	return NULL;
+    if (map < 0 || map >= (gamemode == commercial ? NUMCMAPS : NUMMAPS))
+	return NULL;
+    return lnames[map];
+}
+
 void WI_drawLF(void)
 {
     int y = WI_TITLEY;
+    patch_t*	name = WI_levelName(false);
 
-    // draw <LevelName> 
-    V_DrawPatch((SCREENWIDTH - SHORT(lnames[wbs->last]->width))/2,
-		y, FB, lnames[wbs->last]);
+    if (name)
+    {
+	// draw <LevelName> 
+	V_DrawPatch((SCREENWIDTH - SHORT(name->width))/2,
+		    y, FB, name);
+
+	y += (5*SHORT(name->height))/4;
+    }
 
     // draw "Finished!"
-    y += (5*SHORT(lnames[wbs->last]->height))/4;
     
     V_DrawPatch((SCREENWIDTH - SHORT(finished->width))/2,
 		y, FB, finished);
@@ -439,16 +474,20 @@ void WI_drawLF(void)
 void WI_drawEL(void)
 {
     int y = WI_TITLEY;
+    patch_t*	name = WI_levelName(true);
 
     // draw "Entering"
     V_DrawPatch((SCREENWIDTH - SHORT(entering->width))/2,
 		y, FB, entering);
 
-    // draw level
-    y += (5*SHORT(lnames[wbs->next]->height))/4;
+    if (!name)
+	return;
 
-    V_DrawPatch((SCREENWIDTH - SHORT(lnames[wbs->next]->width))/2,
-		y, FB, lnames[wbs->next]);
+    // draw level
+    y += (5*SHORT(name->height))/4;
+
+    V_DrawPatch((SCREENWIDTH - SHORT(name->width))/2,
+		y, FB, name);
 
 }
 
@@ -755,6 +794,10 @@ void WI_initShowNextLoc(void)
     acceleratestage = 0;
     cnt = SHOWNEXTLOCDELAY * TICRATE;
 
+    // UMAPINFO EnterPic replaces the background for "Entering".
+    if (enterpiclump >= 0)
+	V_DrawPatch(0, 0, 1, W_CacheLumpNum(enterpiclump, PU_CACHE));
+
     WI_initAnimatedBack();
 }
 
@@ -781,7 +824,9 @@ void WI_drawShowNextLoc(void)
 
     if ( gamemode != commercial)
     {
-  	if (wbs->epsd > 2)
+	// No episode map past E3, and none to show when the
+	// next level is in another episode or has its own picture.
+  	if (wbs->epsd > 2 || wbs->nextep != lastep || enterpiclump >= 0)
 	{
 	    WI_drawEL();
 	    return;
@@ -1459,7 +1504,7 @@ void WI_drawStats(void)
     V_DrawPatch(SP_TIMEX, SP_TIMEY, FB, time);
     WI_drawTime(SCREENWIDTH/2 - SP_TIMEX, SP_TIMEY, cnt_time);
 
-    if (wbs->epsd < 3)
+    if (showpar)
     {
 	V_DrawPatch(SCREENWIDTH/2 + SP_TIMEX, SP_TIMEY, FB, par);
 	WI_drawTime(SCREENWIDTH - SP_TIMEX, SP_TIMEY, cnt_par);
@@ -1544,13 +1589,18 @@ void WI_loadData(void)
 
     if (gamemode == commercial)
 	strcpy(name, "INTERPIC");
+    else if (wbs->epsd > 2)
+	strcpy(name, "INTERPIC");	// E4, and PWAD episodes
     else 
 	sprintf(name, "WIMAP%d", wbs->epsd);
-    
-    if ( gamemode == retail )
+
+    // UMAPINFO ExitPic of the level just finished
     {
-      if (wbs->epsd == 3)
-	strcpy(name,"INTERPIC");
+	umapinfo_t*	mi = U_FindMap(gamemode == commercial ? 0 : lastep+1,
+				       wbs->last+1);
+
+	if (mi && mi->exitpic[0] && W_CheckNumForName(mi->exitpic) >= 0)
+	    strcpy(name, mi->exitpic);
     }
 
     // background
@@ -1586,8 +1636,12 @@ void WI_loadData(void)
 				       PU_STATIC, 0);
 	for (i=0 ; i<NUMMAPS ; i++)
 	{
+	    // PWAD episodes may leave some out; see WI_levelName.
 	    sprintf(name, "WILV%d%d", wbs->epsd, i);
-	    lnames[i] = W_CacheLumpName(name, PU_STATIC);
+	    if (W_CheckNumForName(name) >= 0)
+		lnames[i] = W_CacheLumpName(name, PU_STATIC);
+	    else
+		lnames[i] = NULL;
 	}
 
 	// you are here
@@ -1728,7 +1782,8 @@ void WI_unloadData(void)
 	Z_ChangeTag(splat, PU_CACHE);
 
 	for (i=0 ; i<NUMMAPS ; i++)
-	    Z_ChangeTag(lnames[i], PU_CACHE);
+	    if (lnames[i])
+		Z_ChangeTag(lnames[i], PU_CACHE);
 	
 	if (wbs->epsd < 3)
 	{
@@ -1830,9 +1885,29 @@ void WI_initVariables(wbstartstruct_t* wbstartstruct)
     if (!wbs->maxsecret)
 	wbs->maxsecret = 1;
 
+    lastep = wbs->epsd;
+
+    // Only E4 is remapped; PWAD episodes keep their number,
+    // so WILV5x and the like are looked up for E6.
     if ( gamemode != retail )
-      if (wbs->epsd > 2)
+      if (wbs->epsd == 3)
 	wbs->epsd -= 3;
+
+    {
+	int		ep = gamemode == commercial ? 0 : lastep+1;
+	int		nextep = gamemode == commercial ? 0 : wbs->nextep+1;
+	umapinfo_t*	last = U_FindMap(ep, wbs->last+1);
+	umapinfo_t*	next = U_FindMap(nextep, wbs->next+1);
+
+	lastpiclump = last && last->levelpic[0]
+	    ? W_CheckNumForName(last->levelpic) : -1;
+	nextpiclump = next && next->levelpic[0]
+	    ? W_CheckNumForName(next->levelpic) : -1;
+	enterpiclump = next && next->enterpic[0]
+	    ? W_CheckNumForName(next->enterpic) : -1;
+	showpar = gamemode == commercial || wbs->epsd < 3
+	    || (last && last->partime);
+    }
 }
 
 void WI_Start(wbstartstruct_t* wbstartstruct)

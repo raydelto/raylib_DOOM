@@ -84,6 +84,13 @@ S_ChangeMusic
 ( int		music_id,
   int		looping );
 
+// Start music from a lump named by UMAPINFO, e.g. "D_E6M1".
+// Returns 0, playing nothing new, if there is no such lump.
+int
+S_ChangeMusicLump
+( char*		lumpname,
+  int		looping );
+
 // Stops the music fer sure.
 void S_StopMusic(void);
 

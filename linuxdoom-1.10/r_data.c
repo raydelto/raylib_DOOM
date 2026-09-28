@@ -128,9 +128,11 @@ typedef struct
 
 
 
-int		firstflat;
-int		lastflat;
 int		numflats;
+
+// Lump number of each flat. Flats can come from several WADs,
+// so they are not one run of lumps as the IWAD alone has them.
+int*		flatlumps;
 
 int		firstpatch;
 int		lastpatch;
@@ -582,11 +584,48 @@ void R_InitTextures (void)
 //
 void R_InitFlats (void)
 {
-    int		i;
-	
-    firstflat = W_GetNumForName ("F_START") + 1;
-    lastflat = W_GetNumForName ("F_END") - 1;
-    numflats = lastflat - firstflat + 1;
+    int		i, j;
+    boolean	inflats = false;
+
+    // Every lump between F_START (or FF_START) and F_END (or
+    // FF_END), in any WAD. A PWAD flat with the name of an
+    // earlier one replaces it in place, so the IWAD's flat
+    // numbers (animation ranges, savegames) stay the same;
+    // new ones go at the end. Vanilla only saw the last
+    // F_START..F_END, so PWADs with flats (SIGIL II) lost
+    // the IWAD's.
+    flatlumps = Z_Malloc (numlumps*sizeof(*flatlumps), PU_STATIC, 0);
+    numflats = 0;
+
+    for (i=0 ; i<numlumps ; i++)
+    {
+	char*	name = lumpinfo[i].name;
+
+	if (!strncasecmp (name, "F_START", 8)
+	    || !strncasecmp (name, "FF_START", 8))
+	{
+	    inflats = true;
+	    continue;
+	}
+	if (!strncasecmp (name, "F_END", 8)
+	    || !strncasecmp (name, "FF_END", 8))
+	{
+	    inflats = false;
+	    continue;
+	}
+	if (!inflats)
+	    continue;
+
+	for (j=0 ; j<numflats ; j++)
+	    if (!strncasecmp (lumpinfo[flatlumps[j]].name, name, 8))
+		break;
+	flatlumps[j] = i;
+	if (j == numflats)
+	    numflats++;
+    }
+
+    if (!numflats)
+	I_Error ("R_InitFlats: no flats between F_START and F_END");
 	
     // Create translation table for global animation.
     flattranslation = Z_Malloc ((numflats+1)*sizeof(*flattranslation), PU_STATIC, 0);
@@ -676,15 +715,14 @@ int R_FlatNumForName (char* name)
     int		i;
     char	namet[9];
 
-    i = W_CheckNumForName (name);
+    for (i=numflats-1 ; i>=0 ; i--)
+	if (!strncasecmp (lumpinfo[flatlumps[i]].name, name, 8))
+	    return i;
 
-    if (i == -1)
-    {
-	namet[8] = 0;
-	memcpy (namet, name,8);
-	I_Error ("R_FlatNumForName: %s not found",namet);
-    }
-    return i - firstflat;
+    namet[8] = 0;
+    memcpy (namet, name,8);
+    I_Error ("R_FlatNumForName: %s not found",namet);
+    return -1;
 }
 
 
@@ -776,7 +814,7 @@ void R_PrecacheLevel (void)
     {
 	if (flatpresent[i])
 	{
-	    lump = firstflat + i;
+	    lump = flatlumps[i];
 	    flatmemory += lumpinfo[lump].size;
 	    W_CacheLumpNum(lump, PU_CACHE);
 	}

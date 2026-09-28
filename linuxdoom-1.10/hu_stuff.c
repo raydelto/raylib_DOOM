@@ -33,6 +33,8 @@ rcsid[] = "$Id: hu_stuff.c,v 1.4 1997/02/03 16:47:52 b1 Exp $";
 
 #include "hu_stuff.h"
 #include "hu_lib.h"
+#include "u_mapinfo.h"
+#include <stdio.h>
 #include "w_wad.h"
 
 #include "s_sound.h"
@@ -421,6 +423,8 @@ void HU_Start(void)
 
     int		i;
     char*	s;
+    static char	title[80];
+    umapinfo_t*	mi;
 
     if (headsupactive)
 	HU_Stop();
@@ -443,12 +447,21 @@ void HU_Start(void)
 		       hu_font,
 		       HU_FONTSTART);
     
+    mi = U_FindMap (gamemode == commercial ? 0 : gameepisode, gamemap);
+
     switch ( gamemode )
     {
       case shareware:
       case registered:
       case retail:
-	s = HU_TITLE;
+	if (gameepisode <= 4)
+	    s = HU_TITLE;
+	else
+	{
+	    // mapnames[] stops at E4M9.
+	    snprintf (title, sizeof(title), "E%dM%d", gameepisode, gamemap);
+	    s = title;
+	}
 	break;
 
 /* FIXME
@@ -464,6 +477,16 @@ void HU_Start(void)
       default:
 	 s = HU_TITLE2;
 	 break;
+    }
+
+    if (mi && mi->levelname)
+    {
+	if (gamemode == commercial)
+	    snprintf (title, sizeof(title), "MAP%02d: %s", gamemap, mi->levelname);
+	else
+	    snprintf (title, sizeof(title), "E%dM%d: %s",
+		      gameepisode, gamemap, mi->levelname);
+	s = title;
     }
     
     while (*s)

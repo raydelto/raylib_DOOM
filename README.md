@@ -145,6 +145,24 @@ exits.
 | `-iwad FILE`         | Use FILE as the IWAD                      |
 | `-warp E M` / `-warp M`, `-skill N`, `-loadgame N` | As in the original |
 
+PWADs that add episodes past E4, such as SIGIL (E5) and SIGIL II (E6),
+work with a DOOM 1 IWAD: their `UMAPINFO` puts the episode in the New
+Game menu and supplies level names, music, sky, intermission pictures,
+par times, the next and secret levels, and the end text and picture:
+
+```sh
+./build/raylibdoom -iwad freedoom1.wad -file SIGIL_II_V1_0.WAD -warp 6 1
+```
+
+These WADs replace the IWAD's texture list, so Freedoom's own episodes
+may not load while one is added.
+
+Only part of UMAPINFO is supported (see the top of
+`linuxdoom-1.10/u_mapinfo.c`). `NoIntermission` is ignored, `EndCast`
+ends the game without the cast, `InterText` shows only on a level that
+ends the game, and a `BossAction` other than `clear` keeps the default
+boss behaviour.
+
 The picture is scaled to the window in two steps, first by a whole
 number with sharp pixels and then smoothly to the final size, so every
 pixel row comes out the same height. Alt+Enter toggles fullscreen. The
@@ -186,6 +204,16 @@ that off, or `DOOM_WSL_MOUSE=1` to force it.
   assumes a signed `char` (movement in `ticcmd_t` among others) and
   plain `char` is unsigned there. Without it backward and left moves
   went forward and right, and demos desynced.
+- `u_mapinfo.c` / `u_mapinfo.h`: new, a `UMAPINFO` parser. `g_game.c`,
+  `m_menu.c`, `s_sound.c`, `wi_stuff.c`, `f_finale.c`, `hu_stuff.c` and
+  `p_enemy.c` use it for PWAD episodes; `G_InitNew` no longer turns E5
+  and E6 into E4 when the maps are there. Flats are gathered from every
+  WAD's `F_START`/`F_END`, not only the last one's, and the rendering
+  limits (visplanes, drawsegs, sprites, openings) and the unchecked
+  arrays behind them are raised for limit-removing maps.
+- Ultimate DOOM skies: `G_DoLoadLevel` compared `gamemode` with the
+  mission values `pack_tnt` and `pack_plut`, and `retail` equals
+  `pack_plut`, so E2-E4 levels got DOOM II's `SKY1`.
 - Fixes for bugs modern compilers and glibc catch: undersized WAD path
   buffers, the unterminated sprite name list, undefined event queue
   increments, and a `memset` that cleared only part of the mouse and

@@ -37,6 +37,7 @@ rcsid[] = "$Id: p_enemy.c,v 1.5 1997/02/03 22:45:11 b1 Exp $";
 #include "s_sound.h"
 
 #include "g_game.h"
+#include "u_mapinfo.h"
 
 // State.
 #include "doomstat.h"
@@ -264,7 +265,7 @@ boolean P_CheckMissileRange (mobj_t* actor)
 fixed_t	xspeed[8] = {FRACUNIT,47000,0,-47000,-FRACUNIT,-47000,0,47000};
 fixed_t yspeed[8] = {0,47000,FRACUNIT,47000,0,-47000,-FRACUNIT,-47000};
 
-#define MAXSPECIALCROSS	8
+#define MAXSPECIALCROSS	64	// as in p_map.c
 
 extern	line_t*	spechit[MAXSPECIALCROSS];
 extern	int	numspechit;
@@ -1612,6 +1613,12 @@ void A_BossDeath (mobj_t* mo)
     mobj_t*	mo2;
     line_t	junk;
     int		i;
+    umapinfo_t*	mi;
+
+    // UMAPINFO "BossAction = clear": bosses dying does nothing.
+    mi = U_FindMap (gamemode == commercial ? 0 : gameepisode, gamemap);
+    if (mi && mi->bossactionclear)
+	return;
 		
     if ( gamemode == commercial)
     {
