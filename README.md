@@ -182,6 +182,10 @@ that off, or `DOOM_WSL_MOUSE=1` to force it.
   pointer/integer casts through `intptr_t`, the on-disk texture struct
   no longer holds a pointer, the config file's string settings, the
   savegame buffer, and the zone heap size.
+- arm/aarch64 Linux: built with `-fsigned-char`, because the code
+  assumes a signed `char` (movement in `ticcmd_t` among others) and
+  plain `char` is unsigned there. Without it backward and left moves
+  went forward and right, and demos desynced.
 - Fixes for bugs modern compilers and glibc catch: undersized WAD path
   buffers, the unterminated sprite name list, undefined event queue
   increments, and a `memset` that cleared only part of the mouse and
