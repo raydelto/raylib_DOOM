@@ -12,6 +12,11 @@ CFLAGS=-g -O2 -std=gnu11 -fwrapv -fno-strict-aliasing -Wall \
 LDFLAGS=
 LIBS=$(shell pkg-config --libs raylib) -lm
 
+# The code assumes a signed char, which arm/aarch64 Linux lacks.
+ifneq ($(filter aarch64 arm%,$(shell uname -m)),)
+CFLAGS+=-fsigned-char
+endif
+
 # subdirectory for objects
 O=linux
 

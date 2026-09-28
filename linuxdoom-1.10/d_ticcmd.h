@@ -43,6 +43,10 @@ typedef struct
     byte	buttons;
 } ticcmd_t;
 
+// Moves and much else assume a signed char; arm/aarch64 Linux
+// needs -fsigned-char, or demos desync and backward moves go forward.
+_Static_assert ((char)-1 < 0, "build with -fsigned-char");
+
 
 
 #endif

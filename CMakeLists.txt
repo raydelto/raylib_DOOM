@@ -50,12 +50,25 @@ if(APPLE)
   target_link_libraries(raylibdoom PRIVATE "-framework CoreFoundation")
 endif()
 
+# Plain char is unsigned on Linux arm/aarch64, but the code assumes it
+# is signed, as on x86: ticcmd_t's forwardmove and sidemove are char,
+# so backward and left moves came out as big forward/right ones and
+# demos desynced. x86 and Apple/Windows arm64 already have a signed
+# char, so this changes only builds where it was unsigned.
+# d_ticcmd.h refuses to compile without it.
+set(DOOM_SIGNED_CHAR "")
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang"
+   AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64|arm)")
+  set(DOOM_SIGNED_CHAR -fsigned-char)
+endif()
+
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   # The 1993 code relies on signed overflow wrapping and on
   # type punning through pointers; keep the optimizer honest.
   target_compile_options(raylibdoom PRIVATE
     -fwrapv -fno-strict-aliasing -Wall -Wno-unused-variable
     -Wno-unused-but-set-variable -Wno-unused-const-variable)
+  target_compile_options(raylibdoom PRIVATE ${DOOM_SIGNED_CHAR})
 endif()
 
 # Parser regression tests: cmake --build build && ctest --test-dir build
@@ -64,6 +77,7 @@ add_executable(midi_register_test tests/midi_register_test.c ${DOOM_DIR}/opl3.c)
 target_include_directories(midi_register_test PRIVATE ${DOOM_DIR})
 target_compile_definitions(midi_register_test PRIVATE NORMALUNIX LINUX)
 target_link_libraries(midi_register_test PRIVATE m)
+target_compile_options(midi_register_test PRIVATE ${DOOM_SIGNED_CHAR})
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang" AND NOT WIN32)
   # No -fwrapv here: it would hide the signed-shift overflows that
   # the sanitizer is meant to catch.
