@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- OpenXR (Android XR Full Space). Without a runtime or headset the
+     game logs why and plays as the flat app, so none of this is
+     required; see i_xr.c. The Khronos loader AAR adds its own
+     permissions and <queries> for the runtime broker. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- OpenXR's OpenGL ES binding, raylib built for ES 3. -->
+    <uses-feature android:glEsVersion="0x00030000" android:required="true" />
+    <uses-feature android:name="android.software.xr.api.openxr" android:required="false" />
+    <uses-feature android:name="android.hardware.vr.headtracking" android:version="1" android:required="false" />
+
+    <application>
+        <!-- Android XR's OpenXR runtime, which the loader finds here. -->
+        <uses-native-library android:name="libopenxr.google.so" android:required="false" />
+
+        <activity android:name="android.app.NativeActivity">
+            <property
+                android:name="android.window.PROPERTY_XR_ACTIVITY_START_MODE"
+                android:value="XR_ACTIVITY_START_MODE_FULL_SPACE_UNMANAGED"
+                tools:replace="android:value" />
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+                <category android:name="org.khronos.openxr.intent.category.IMMERSIVE_HMD" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

@@ -29,12 +29,16 @@
 #include "raylib.h"
 
 #include "i_raylib.h"
-#ifdef DOOM_XR
+#if defined(DOOM_XR) || defined(__ANDROID__)
 #include "i_xr.h"
 #endif
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
+#endif
+
+#ifdef __ANDROID__
+#include "i_android.h"
 #endif
 
 
@@ -48,6 +52,9 @@ static void WSL_Init (void);
 static void WSL_Shutdown (void);
 static void ToggleFullscreenWindow (void);
 static void WM_SettleWindowed (void);
+#ifdef __ANDROID__
+static void DrawTouchControls (void);
+#endif
 
 // raylib's INFO chatter would drown DOOM's startup log.
 static void QuietRaylib (void)
@@ -82,7 +89,14 @@ void RL_InitVideo (int width, int height, int scale, int fullscreen)
     SetConfigFlags (FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT);
 
     // DOOM's 320x200 was shown on 4:3 monitors with tall pixels.
+#ifdef __ANDROID__
+    // The whole display (0x0), so RL_Present letterboxes to 4:3
+    // itself and the touch controls can use the side bars; raylib
+    // would letterbox a 4:3 window without them.
+    InitWindow (0, 0, WINDOWTITLE);
+#else
     InitWindow (width*scale, (width*3/4)*scale, WINDOWTITLE);
+#endif
     SetWindowMinSize (width, width*3/4);
 
     // ESC is a game key, not a quit key.
@@ -210,6 +224,9 @@ void RL_Present (const unsigned char* rgba)
     BeginDrawing ();
     ClearBackground (BLACK);
     DrawTexturePro (prescaled.texture, big, dst, (Vector2) { 0, 0 }, 0.0f, WHITE);
+#ifdef __ANDROID__
+    DrawTouchControls ();
+#endif
     EndDrawing ();
 }
 
@@ -307,6 +324,12 @@ static void PostEvent (rl_evtype_t type, int data1, int data2, int data3)
 static int TranslateKey (int key)
 {
     int		i;
+
+#ifdef __ANDROID__
+    // The system Back button (and gesture).
+    if (key == KEY_BACK)
+	key = KEY_ESCAPE;
+#endif
 
     // Letters, digits, space and punctuation are
     // ASCII in raylib. DOOM wants them lowercase.
@@ -469,6 +492,11 @@ void RL_SetMouseGrab (int grab)
 {
     if (grab && !IsWindowFocused ())
 	grab = 0;
+#ifdef __ANDROID__
+    // raylib reports the first finger as the mouse; the touch
+    // controls have it instead.
+    grab = 0;
+#endif
 
     if (grab == mousegrabbed)
 	return;
@@ -490,6 +518,184 @@ void RL_SetMouseGrab (int grab)
     lastmouse = GetMousePosition ();
 }
 
+
+
+#ifdef __ANDROID__
+//
+// GAMEPAD AND TOUCH CONTROLS
+//
+// A gamepad (Bluetooth or USB, through raylib) and buttons drawn
+// over the picture, both reported as the headset controller
+// buttons of i_xr.h, which i_video.c turns into keys: the player's
+// key bindings in the game, the menu keys in menus, y and n in a
+// yes/no prompt. The touch buttons are hidden once a gamepad has
+// been used, and on devices without a touchscreen, and come back
+// when the screen is touched.
+//
+
+// Stick deflection that counts as a key press.
+#define PADSTICK	0.5f
+
+typedef struct
+{
+    unsigned	button;
+    const char*	label;
+    // In units of a seventh of the screen height (small enough to
+    // stay in the side bars of a 20:9 phone), from the left
+    // (x >= 0) or the right (x < 0) edge, and from the top (y >= 0)
+    // or the bottom (y < 0) edge.
+    float	x;
+    float	y;
+    float	w;
+    float	h;
+} touchbutton_t;
+
+static const touchbutton_t touchbuttons[] =
+{
+    { XR_FORWARD,	"^",	1.1f, -2.9f, 1.0f, 1.0f },
+    { XR_BACK,		"v",	1.1f, -1.1f, 1.0f, 1.0f },
+    { XR_TURNLEFT,	"<",	0.2f, -2.0f, 1.0f, 1.0f },
+    { XR_TURNRIGHT,	">",	2.0f, -2.0f, 1.0f, 1.0f },
+    { XR_FIRE,		"FIRE",	-1.6f, -2.2f, 1.4f, 1.4f },
+    { XR_USE,		"USE",	-3.1f, -1.3f, 1.2f, 1.0f },
+    { XR_RUN,		"RUN",	-3.1f, -2.5f, 1.2f, 1.0f },
+    { XR_MENU,		"MENU",	0.2f, 0.2f, 1.4f, 0.7f },
+    { XR_MAP,		"MAP",	-1.6f, 0.2f, 1.4f, 0.7f },
+};
+
+#define NUMTOUCHBUTTONS	(int)(sizeof(touchbuttons)/sizeof(touchbuttons[0]))
+
+static int		touchshown = -1;	// -1: not decided yet
+static unsigned		touchheld;
+
+
+static Rectangle TouchRect (const touchbutton_t* b)
+{
+    float	u = GetScreenHeight () / 7.0f;
+    float	x = b->x >= 0 ? b->x*u : GetScreenWidth () + b->x*u;
+    float	y = b->y >= 0 ? b->y*u : GetScreenHeight () + b->y*u;
+
+    return (Rectangle) { x, y, b->w*u, b->h*u };
+}
+
+
+static unsigned TouchButtons (void)
+{
+    unsigned	held = 0;
+    int		count;
+    int		i;
+    int		j;
+
+    if (touchshown < 0)
+	touchshown = I_AndroidHasTouchscreen ();
+    count = GetTouchPointCount ();
+    if (count > 0)
+	touchshown = 1;
+    if (!touchshown)
+	return 0;
+
+    for (i = 0; i < count; i++)
+    {
+	Vector2	pos = GetTouchPosition (i);
+
+	for (j = 0; j < NUMTOUCHBUTTONS; j++)
+	    if (CheckCollisionPointRec (pos, TouchRect (&touchbuttons[j])))
+		held |= touchbuttons[j].button;
+    }
+    return held;
+}
+
+
+static int PadDown (int button)
+{
+    return IsGamepadButtonDown (0, button);
+}
+
+
+static unsigned GamepadButtons (void)
+{
+    unsigned	held = 0;
+    float	lx;
+    float	ly;
+    float	rx;
+
+    if (!IsGamepadAvailable (0))
+	return 0;
+
+    lx = GetGamepadAxisMovement (0, GAMEPAD_AXIS_LEFT_X);
+    ly = GetGamepadAxisMovement (0, GAMEPAD_AXIS_LEFT_Y);
+    rx = GetGamepadAxisMovement (0, GAMEPAD_AXIS_RIGHT_X);
+
+    // Left stick moves and strafes, the right one and the d-pad's
+    // sides turn; in menus all of them move the cursor.
+    if (ly < -PADSTICK || PadDown (GAMEPAD_BUTTON_LEFT_FACE_UP))
+	held |= XR_FORWARD;
+    if (ly > PADSTICK || PadDown (GAMEPAD_BUTTON_LEFT_FACE_DOWN))
+	held |= XR_BACK;
+    if (lx < -PADSTICK)
+	held |= XR_STRAFELEFT;
+    if (lx > PADSTICK)
+	held |= XR_STRAFERIGHT;
+    if (rx < -PADSTICK || PadDown (GAMEPAD_BUTTON_LEFT_FACE_LEFT))
+	held |= XR_TURNLEFT;
+    if (rx > PADSTICK || PadDown (GAMEPAD_BUTTON_LEFT_FACE_RIGHT))
+	held |= XR_TURNRIGHT;
+
+    // Triggers come as buttons on some pads, as axes on others.
+    if (PadDown (GAMEPAD_BUTTON_RIGHT_TRIGGER_2)
+	|| PadDown (GAMEPAD_BUTTON_RIGHT_TRIGGER_1)
+	|| PadDown (GAMEPAD_BUTTON_RIGHT_FACE_LEFT)
+	|| GetGamepadAxisMovement (0, GAMEPAD_AXIS_RIGHT_TRIGGER) > 0.0f)
+	held |= XR_FIRE;
+    if (PadDown (GAMEPAD_BUTTON_RIGHT_FACE_DOWN))
+	held |= XR_USE;
+    if (PadDown (GAMEPAD_BUTTON_LEFT_TRIGGER_2)
+	|| PadDown (GAMEPAD_BUTTON_LEFT_TRIGGER_1)
+	|| GetGamepadAxisMovement (0, GAMEPAD_AXIS_LEFT_TRIGGER) > 0.0f)
+	held |= XR_RUN;
+    if (PadDown (GAMEPAD_BUTTON_RIGHT_FACE_RIGHT)
+	|| PadDown (GAMEPAD_BUTTON_RIGHT_FACE_UP)
+	|| PadDown (GAMEPAD_BUTTON_MIDDLE_LEFT))
+	held |= XR_MAP;
+    if (PadDown (GAMEPAD_BUTTON_MIDDLE_RIGHT))
+	held |= XR_MENU;
+
+    if (held)
+	touchshown = 0;
+    return held;
+}
+
+
+unsigned RL_PadButtons (void)
+{
+    touchheld = TouchButtons ();
+    return GamepadButtons () | touchheld;
+}
+
+
+static void DrawTouchControls (void)
+{
+    float	u = GetScreenHeight () / 7.0f;
+    int		size = (int)(u * 0.3f);
+    int		i;
+
+    if (touchshown <= 0)
+	return;
+
+    for (i = 0; i < NUMTOUCHBUTTONS; i++)
+    {
+	const touchbutton_t*	b = &touchbuttons[i];
+	Rectangle		r = TouchRect (b);
+	int			held = (touchheld & b->button) != 0;
+	int			w = MeasureText (b->label, size);
+
+	DrawRectangleRounded (r, 0.3f, 8, Fade (WHITE, held ? 0.35f : 0.12f));
+	DrawRectangleRoundedLinesEx (r, 0.3f, 8, 2.0f, Fade (WHITE, 0.4f));
+	DrawText (b->label, (int)(r.x + (r.width - w) / 2),
+		  (int)(r.y + (r.height - size) / 2), size, Fade (WHITE, 0.7f));
+    }
+}
+#endif
 
 
 //

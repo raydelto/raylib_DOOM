@@ -25,10 +25,15 @@
 //	drawing the quad into eye buffers ourselves, as the image is
 //	resampled only once.
 //
-//	Only OpenGL on X11 (GLX, XR_KHR_opengl_enable) is supported,
-//	which is what raylib's GLFW uses on Linux.
+//	Two graphics bindings, one for each way raylib makes its
+//	context:
+//	- Linux desktop: OpenGL on X11 (GLX, XR_KHR_opengl_enable),
+//	  which is what raylib's GLFW uses there.
+//	- Android (Android XR): OpenGL ES on EGL
+//	  (XR_KHR_opengl_es_enable), from raylib's NativeActivity. The
+//	  loader is started with XR_KHR_loader_init_android first.
 //
-//	This file sees OpenXR, GLX and rlgl, but neither raylib.h
+//	This file sees OpenXR, GLX or EGL and rlgl, but neither raylib.h
 //	(Xlib's Font typedef clashes with raylib's) nor the DOOM
 //	headers.
 //
@@ -39,11 +44,21 @@
 #include <string.h>
 #include <unistd.h>
 
+#ifdef __ANDROID__
+#include <jni.h>
+#include <EGL/egl.h>
+#include <GLES3/gl3.h>
+#include <android_native_app_glue.h>
+
+#define XR_USE_PLATFORM_ANDROID
+#define XR_USE_GRAPHICS_API_OPENGL_ES
+#else
 #include <X11/Xlib.h>
 #include <GL/glx.h>
 
 #define XR_USE_PLATFORM_XLIB
 #define XR_USE_GRAPHICS_API_OPENGL
+#endif
 #include <openxr/openxr.h>
 #include <openxr/openxr_platform.h>
 #include <openxr/openxr_reflection.h>
@@ -72,8 +87,28 @@
 // Stick deflection that counts as a key press.
 #define STICKPRESS	0.5f
 
+#ifdef __ANDROID__
+#define GRAPHICS_EXTENSION	XR_KHR_OPENGL_ES_ENABLE_EXTENSION_NAME
+typedef XrSwapchainImageOpenGLESKHR	swapchainimage_t;
+#define SWAPCHAIN_IMAGE_TYPE	XR_TYPE_SWAPCHAIN_IMAGE_OPENGL_ES_KHR
+
+// raylib's rcore_android.c
+extern struct android_app* GetAndroidApp (void);
+
+// raylib 5.5's rlgl calls glDrawBuffersEXT when built for OpenGL
+// ES 3, but Android's libGLESv3 only has the ES 3 name.
+void GL_APIENTRY glDrawBuffersEXT (GLsizei n, const GLenum* bufs)
+{
+    glDrawBuffers (n, bufs);
+}
+#else
+#define GRAPHICS_EXTENSION	XR_KHR_OPENGL_ENABLE_EXTENSION_NAME
+typedef XrSwapchainImageOpenGLKHR	swapchainimage_t;
+#define SWAPCHAIN_IMAGE_TYPE	XR_TYPE_SWAPCHAIN_IMAGE_OPENGL_KHR
+
 // raylib's GLFW, weak so a raylib that hides it still links.
 extern void glfwSwapInterval (int interval) __attribute__((weak));
+#endif
 
 static XrInstance	instance = XR_NULL_HANDLE;
 static XrSystemId	systemid = XR_NULL_SYSTEM_ID;
@@ -168,8 +203,12 @@ static void SetVsync (int on)
     if (novsync == !on)
 	return;
     novsync = !on;
+#ifdef __ANDROID__
+    eglSwapInterval (eglGetCurrentDisplay (), on);
+#else
     if (glfwSwapInterval)
 	glfwSwapInterval (on);
+#endif
 }
 
 
@@ -189,6 +228,41 @@ static XrPath Path (const char* s)
     xrStringToPath (instance, s, &path);
     return path;
 }
+
+
+#ifdef __ANDROID__
+//
+// InitLoader
+// The Android loader has to be given the VM and the activity
+// before anything else, even the extension list.
+//
+static int InitLoader (void)
+{
+    PFN_xrInitializeLoaderKHR	initloader = NULL;
+    XrLoaderInitInfoAndroidKHR	info = { XR_TYPE_LOADER_INIT_INFO_ANDROID_KHR };
+    struct android_app*		app = GetAndroidApp ();
+    XrResult			r;
+
+    r = xrGetInstanceProcAddr (XR_NULL_HANDLE, "xrInitializeLoaderKHR",
+			       (PFN_xrVoidFunction*)&initloader);
+    if (XR_FAILED (r) || !initloader)
+    {
+	fprintf (stderr, "XR: the OpenXR loader has no"
+		 " xrInitializeLoaderKHR: %s (%d).\n", ResultName (r), (int)r);
+	return 0;
+    }
+    info.applicationVM = app->activity->vm;
+    info.applicationContext = app->activity->clazz;
+    r = initloader ((const XrLoaderInitInfoBaseHeaderKHR*)&info);
+    if (XR_FAILED (r))
+    {
+	fprintf (stderr, "XR: xrInitializeLoaderKHR failed: %s (%d).\n",
+		 ResultName (r), (int)r);
+	return 0;
+    }
+    return 1;
+}
+#endif
 
 
 //
@@ -230,7 +304,17 @@ static int CreateInstance (void)
     uint32_t			i;
     int				havegl;
     XrResult			r;
-    const char*			extensions[] = { XR_KHR_OPENGL_ENABLE_EXTENSION_NAME };
+#ifdef __ANDROID__
+    XrInstanceCreateInfoAndroidKHR	android = { XR_TYPE_INSTANCE_CREATE_INFO_ANDROID_KHR };
+    struct android_app*		app = GetAndroidApp ();
+    const char*			extensions[] = {
+	GRAPHICS_EXTENSION, XR_KHR_ANDROID_CREATE_INSTANCE_EXTENSION_NAME };
+
+    if (!InitLoader ())
+	return 0;
+#else
+    const char*			extensions[] = { GRAPHICS_EXTENSION };
+#endif
 
     props = NULL;
     r = XR_ERROR_SIZE_INSUFFICIENT;
@@ -242,6 +326,11 @@ static int CreateInstance (void)
 	r = xrEnumerateInstanceExtensionProperties (NULL, 0, &count, NULL);
 	if (XR_FAILED (r))
 	{
+#ifdef __ANDROID__
+	    fprintf (stderr, "XR: no OpenXR runtime found (%s).\n",
+		     ResultName (r));
+	    return 0;
+#endif
 	    fprintf (stderr,
 		     "XR: no OpenXR runtime found (%s).\n"
 		     "XR: Start one (for Monado: monado-service), or point\n"
@@ -269,15 +358,27 @@ static int CreateInstance (void)
 
     havegl = 0;
     for (i = 0; i < count; i++)
-	if (!strncmp (props[i].extensionName,
-		      XR_KHR_OPENGL_ENABLE_EXTENSION_NAME,
+    {
+#ifdef __ANDROID__
+	// What the device's runtime offers; Android XR recommends
+	// Vulkan, so check that GLES is there.
+	printf ("XR: runtime extension %s v%u\n", props[i].extensionName,
+		(unsigned)props[i].extensionVersion);
+#endif
+	if (!strncmp (props[i].extensionName, GRAPHICS_EXTENSION,
 		      XR_MAX_EXTENSION_NAME_SIZE))
 	    havegl = 1;
+    }
     free (props);
     if (!havegl)
     {
+#ifdef __ANDROID__
+	fprintf (stderr, "XR: the OpenXR runtime has no OpenGL ES support"
+		 " (" GRAPHICS_EXTENSION ").\n");
+#else
 	fprintf (stderr, "XR: the OpenXR runtime has no OpenGL support"
-		 " (" XR_KHR_OPENGL_ENABLE_EXTENSION_NAME ").\n");
+		 " (" GRAPHICS_EXTENSION ").\n");
+#endif
 	return 0;
     }
 
@@ -294,10 +395,24 @@ static int CreateInstance (void)
 #else
     info.applicationInfo.apiVersion = XR_CURRENT_API_VERSION;
 #endif
-    info.enabledExtensionCount = 1;
+    info.enabledExtensionCount = sizeof(extensions)/sizeof(extensions[0]);
     info.enabledExtensionNames = extensions;
+#ifdef __ANDROID__
+    android.applicationVM = app->activity->vm;
+    android.applicationActivity = app->activity->clazz;
+    info.next = &android;
+#endif
 
     r = xrCreateInstance (&info, &instance);
+#ifdef __ANDROID__
+    if (XR_FAILED (r))
+    {
+	fprintf (stderr, "XR: xrCreateInstance failed: %s (%d).\n",
+		 ResultName (r), (int)r);
+	instance = XR_NULL_HANDLE;
+	return 0;
+    }
+#endif
     if (XR_FAILED (r))
     {
 	fprintf (stderr,
@@ -332,6 +447,14 @@ static int GetSystem (void)
 
     info.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
     r = xrGetSystem (instance, &info, &systemid);
+#ifdef __ANDROID__
+    if (XR_FAILED (r))
+    {
+	fprintf (stderr, "XR: no headset or glasses found: %s (%d).\n",
+		 ResultName (r), (int)r);
+	return 0;
+    }
+#endif
     if (XR_FAILED (r))
     {
 	fprintf (stderr, "XR: no headset found: %s (%d).\n"
@@ -348,6 +471,96 @@ static int GetSystem (void)
 }
 
 
+#ifdef __ANDROID__
+//
+// CreateSession
+// On the OpenGL ES context raylib made current, found through EGL.
+//
+static int CreateSession (void)
+{
+    PFN_xrGetOpenGLESGraphicsRequirementsKHR	getreqs;
+    XrGraphicsRequirementsOpenGLESKHR		reqs = { XR_TYPE_GRAPHICS_REQUIREMENTS_OPENGL_ES_KHR };
+    XrGraphicsBindingOpenGLESAndroidKHR		binding = { XR_TYPE_GRAPHICS_BINDING_OPENGL_ES_ANDROID_KHR };
+    XrSessionCreateInfo				info = { XR_TYPE_SESSION_CREATE_INFO };
+    EGLDisplay	dpy;
+    EGLContext	ctx;
+    EGLConfig	config;
+    EGLint	attribs[3];
+    EGLint	configid;
+    EGLint	n;
+    int		major;
+    int		minor;
+    XrResult	r;
+
+    dpy = eglGetCurrentDisplay ();
+    ctx = eglGetCurrentContext ();
+    if (dpy == EGL_NO_DISPLAY || ctx == EGL_NO_CONTEXT)
+    {
+	fprintf (stderr, "XR: no current EGL context.\n");
+	return 0;
+    }
+
+    // The runtime refuses a session unless this was asked first.
+    if (!Check (xrGetInstanceProcAddr (instance,
+				       "xrGetOpenGLESGraphicsRequirementsKHR",
+				       (PFN_xrVoidFunction*)&getreqs),
+		"xrGetInstanceProcAddr(xrGetOpenGLESGraphicsRequirementsKHR)")
+	|| !Check (getreqs (instance, systemid, &reqs),
+		   "xrGetOpenGLESGraphicsRequirementsKHR"))
+	return 0;
+
+    // raylib asks EGL for ES 2, which Android drivers answer with
+    // the newest ES they have.
+    major = rlGetVersion () == RL_OPENGL_ES_30 ? 3 : 2;
+    minor = 0;
+    {
+	const char*	version = (const char*)glGetString (GL_VERSION);
+
+	if (version)
+	{
+	    printf ("XR: %s\n", version);
+	    sscanf (version, "OpenGL ES %d.%d", &major, &minor);
+	}
+    }
+    if (XR_MAKE_VERSION (major, minor, 0) < reqs.minApiVersionSupported)
+    {
+	fprintf (stderr, "XR: the runtime needs OpenGL ES %d.%d, raylib's"
+		 " context is %d.%d.\n",
+		 (int)XR_VERSION_MAJOR (reqs.minApiVersionSupported),
+		 (int)XR_VERSION_MINOR (reqs.minApiVersionSupported),
+		 major, minor);
+	return 0;
+    }
+
+    configid = 0;
+    eglQueryContext (dpy, ctx, EGL_CONFIG_ID, &configid);
+    attribs[0] = EGL_CONFIG_ID;
+    attribs[1] = configid;
+    attribs[2] = EGL_NONE;
+    if (!eglChooseConfig (dpy, attribs, &config, 1, &n) || n < 1)
+    {
+	fprintf (stderr, "XR: can not find the EGL config"
+		 " of raylib's context.\n");
+	return 0;
+    }
+
+    binding.display = dpy;
+    binding.config = config;
+    binding.context = ctx;
+
+    info.next = &binding;
+    info.systemId = systemid;
+    r = xrCreateSession (instance, &info, &session);
+    if (XR_FAILED (r))
+    {
+	fprintf (stderr, "XR: xrCreateSession failed: %s (%d).\n",
+		 ResultName (r), (int)r);
+	session = XR_NULL_HANDLE;
+	return 0;
+    }
+    return 1;
+}
+#else
 //
 // CreateSession
 // On the OpenGL context raylib made current, found through GLX.
@@ -425,6 +638,7 @@ static int CreateSession (void)
     }
     return 1;
 }
+#endif
 
 
 //
@@ -449,7 +663,7 @@ static int CreateSpace (void)
 static int CreateSwapchain (void)
 {
     XrSwapchainCreateInfo	info = { XR_TYPE_SWAPCHAIN_CREATE_INFO };
-    XrSwapchainImageOpenGLKHR*	images;
+    swapchainimage_t*		images;
     int64_t*			formats;
     uint32_t			count;
     uint32_t			capacity;
@@ -536,7 +750,7 @@ static int CreateSwapchain (void)
 	return 0;
     }
     for (i = 0; i < capacity; i++)
-	images[i].type = XR_TYPE_SWAPCHAIN_IMAGE_OPENGL_KHR;
+	images[i].type = SWAPCHAIN_IMAGE_TYPE;
     r = xrEnumerateSwapchainImages (swapchain, capacity, &count,
 				    (XrSwapchainImageBaseHeader*)images);
     if (!Check (r, "xrEnumerateSwapchainImages") || count != capacity)

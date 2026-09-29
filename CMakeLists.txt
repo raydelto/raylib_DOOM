@@ -19,6 +19,25 @@ if(EMSCRIPTEN)
   set(PLATFORM Web CACHE STRING "raylib platform" FORCE)
 endif()
 
+# Android APK (android/): its Gradle build configures this with the
+# NDK and -DRAYLIB_DOOM_ANDROID=ON, which makes the game
+# libraylibdoom.so, loaded by NativeActivity. RAYLIB_DOOM_ANDROID_XR
+# adds the OpenXR output (i_xr.c on EGL) with the Khronos loader.
+option(RAYLIB_DOOM_ANDROID "Build libraylibdoom.so for the Android APK" OFF)
+option(RAYLIB_DOOM_ANDROID_XR "Add OpenXR (Android XR) to the Android build" OFF)
+if(RAYLIB_DOOM_ANDROID)
+  if(NOT ANDROID)
+    message(FATAL_ERROR "RAYLIB_DOOM_ANDROID needs the NDK's toolchain; build android/ with Gradle")
+  endif()
+  set(PLATFORM Android CACHE STRING "raylib platform" FORCE)
+  if(RAYLIB_DOOM_ANDROID_XR)
+    # OpenXR runtimes want OpenGL ES 3.
+    set(OPENGL_VERSION "ES 3.0" CACHE STRING "raylib OpenGL version" FORCE)
+  endif()
+elseif(RAYLIB_DOOM_ANDROID_XR)
+  message(FATAL_ERROR "RAYLIB_DOOM_ANDROID_XR needs RAYLIB_DOOM_ANDROID")
+endif()
+
 # Use an installed raylib if there is one, otherwise build it.
 find_package(raylib 5.0 QUIET)
 if(NOT raylib_FOUND)
@@ -49,7 +68,23 @@ set(DOOM_SOURCES
   opl3.c)
 list(TRANSFORM DOOM_SOURCES PREPEND ${DOOM_DIR}/)
 
-add_executable(raylibdoom ${DOOM_SOURCES})
+if(RAYLIB_DOOM_ANDROID)
+  add_library(raylibdoom SHARED ${DOOM_SOURCES} ${DOOM_DIR}/i_android.c)
+  target_include_directories(raylibdoom PRIVATE
+    ${ANDROID_NDK}/sources/android/native_app_glue)
+  # Keep the glue's entry point, which NativeActivity looks up.
+  target_link_options(raylibdoom PRIVATE -u ANativeActivity_onCreate)
+  target_link_libraries(raylibdoom PRIVATE android log)
+  if(RAYLIB_DOOM_ANDROID_XR)
+    # From the openxr_loader_for_android AAR, through prefab.
+    find_package(OpenXR REQUIRED CONFIG)
+    target_sources(raylibdoom PRIVATE ${DOOM_DIR}/i_xr.c)
+    target_compile_definitions(raylibdoom PRIVATE DOOM_XR)
+    target_link_libraries(raylibdoom PRIVATE OpenXR::openxr_loader EGL GLESv3)
+  endif()
+else()
+  add_executable(raylibdoom ${DOOM_SOURCES})
+endif()
 target_compile_definitions(raylibdoom PRIVATE NORMALUNIX LINUX)
 target_link_libraries(raylibdoom PRIVATE raylib m)
 if(WIN32)
@@ -86,8 +121,9 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
 endif()
 
 # Parser regression tests: cmake --build build && ctest --test-dir build
-# They need the host's sanitizers, so the browser build has none.
-if(EMSCRIPTEN)
+# They need the host's sanitizers, so the browser and Android
+# builds have none.
+if(EMSCRIPTEN OR RAYLIB_DOOM_ANDROID)
   return()
 endif()
 enable_testing()
