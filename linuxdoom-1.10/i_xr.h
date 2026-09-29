@@ -50,13 +50,22 @@ void XR_PrepareGL (void);
 
 // Connects to the OpenXR runtime and creates a session on the
 // current OpenGL (GLX) context, so the window must be open.
-// distance and width place the virtual screen, in meters.
+// distance and width place the virtual screen, in meters; a width
+// of 0 fits it to the field of view. lift raises black, as a
+// fraction of white, for see-through glasses; below 0 lifts only
+// on an additive display.
 // Returns 0, having said why, if there is no runtime or headset.
-int XR_Init (float distance, float width);
+int XR_Init (float distance, float width, float lift);
 void XR_Shutdown (void);
 
 // True between a successful XR_Init and XR_Shutdown.
 int XR_Active (void);
+
+// How far to raise black in the headset's image (0 to 1).
+float XR_BlackLift (void);
+
+// Logs frame pacing every few seconds (-xrstats).
+void XR_Stats (int on);
 
 // Handles runtime events (session state changes) and reads the
 // controllers. Returns 0 once the runtime wants the game to quit.

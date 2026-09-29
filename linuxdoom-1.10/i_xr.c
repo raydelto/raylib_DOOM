@@ -42,6 +42,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
+#include <time.h>
 #include <unistd.h>
 
 #ifdef __ANDROID__
@@ -86,6 +88,19 @@
 
 // Stick deflection that counts as a key press.
 #define STICKPRESS	0.5f
+
+// Without -xrwidth the screen is made no wider than this, and
+// small enough to fill no more than FITFOV of the narrowest half
+// field of view, so it fits in see-through glasses too.
+#define MAXWIDTH	3.2f
+#define FITFOV		0.9f
+
+// Black lift on see-through (additive) displays, where black is
+// transparent and dark scenes disappear against the room.
+#define ADDITIVELIFT	0.12f
+
+// XR_EXT_hand_interaction is newer than some SDK headers.
+#define HANDINTERACTION	"XR_EXT_hand_interaction"
 
 #ifdef __ANDROID__
 #define GRAPHICS_EXTENSION	XR_KHR_OPENGL_ES_ENABLE_EXTENSION_NAME
@@ -136,6 +151,18 @@ static int		novsync;	// the window's vsync is off
 
 static float		screendistance;
 static float		screenwidth;
+static int		fitscreen;	// no -xrwidth: fit to the field of view
+static float		blacklift;	// -xrlift, or <0 for the default
+static int		havehands;	// XR_EXT_hand_interaction
+
+// -xrstats: frame pacing, logged every STATSECONDS.
+#define STATSECONDS	10
+static int		stats;
+static double		statstart;
+static double		lastwait;
+static int		statframes;
+static int		statlate;
+static double		statworst;
 
 static XrActionSet	actionset = XR_NULL_HANDLE;
 static XrAction		act_move;
@@ -179,6 +206,18 @@ static const char* StateName (XrSessionState s)
 // The runtime went away (monado-service quit, headset unplugged).
 // Nothing more is sent to it; XR_Update drops OpenXR and the game
 // goes on in the window.
+static const char* BlendName (XrEnvironmentBlendMode m)
+{
+    switch (m)
+    {
+      case XR_ENVIRONMENT_BLEND_MODE_OPAQUE:	return "opaque";
+      case XR_ENVIRONMENT_BLEND_MODE_ADDITIVE:	return "additive";
+      case XR_ENVIRONMENT_BLEND_MODE_ALPHA_BLEND:	return "alpha blend";
+      default:					return "unknown";
+    }
+}
+
+
 static int Lost (XrResult r)
 {
     if (r == XR_ERROR_SESSION_LOST || r == XR_ERROR_INSTANCE_LOST)
@@ -304,17 +343,22 @@ static int CreateInstance (void)
     uint32_t			i;
     int				havegl;
     XrResult			r;
+    const char*			extensions[3];
+    uint32_t			numextensions;
 #ifdef __ANDROID__
     XrInstanceCreateInfoAndroidKHR	android = { XR_TYPE_INSTANCE_CREATE_INFO_ANDROID_KHR };
     struct android_app*		app = GetAndroidApp ();
-    const char*			extensions[] = {
-	GRAPHICS_EXTENSION, XR_KHR_ANDROID_CREATE_INSTANCE_EXTENSION_NAME };
 
     if (!InitLoader ())
 	return 0;
-#else
-    const char*			extensions[] = { GRAPHICS_EXTENSION };
 #endif
+
+    numextensions = 0;
+    extensions[numextensions++] = GRAPHICS_EXTENSION;
+#ifdef __ANDROID__
+    extensions[numextensions++] = XR_KHR_ANDROID_CREATE_INSTANCE_EXTENSION_NAME;
+#endif
+    havehands = 0;
 
     props = NULL;
     r = XR_ERROR_SIZE_INSUFFICIENT;
@@ -368,6 +412,10 @@ static int CreateInstance (void)
 	if (!strncmp (props[i].extensionName, GRAPHICS_EXTENSION,
 		      XR_MAX_EXTENSION_NAME_SIZE))
 	    havegl = 1;
+	// Pinches, on glasses and headsets tracking bare hands.
+	if (!strncmp (props[i].extensionName, HANDINTERACTION,
+		      XR_MAX_EXTENSION_NAME_SIZE))
+	    havehands = 1;
     }
     free (props);
     if (!havegl)
@@ -395,7 +443,9 @@ static int CreateInstance (void)
 #else
     info.applicationInfo.apiVersion = XR_CURRENT_API_VERSION;
 #endif
-    info.enabledExtensionCount = sizeof(extensions)/sizeof(extensions[0]);
+    if (havehands)
+	extensions[numextensions++] = HANDINTERACTION;
+    info.enabledExtensionCount = numextensions;
     info.enabledExtensionNames = extensions;
 #ifdef __ANDROID__
     android.applicationVM = app->activity->vm;
@@ -671,6 +721,7 @@ static int CreateSwapchain (void)
     int				tries;
     XrResult			r;
     XrEnvironmentBlendMode	modes[8];
+    int				seethrough;
 
     formats = NULL;
     count = capacity = 0;
@@ -776,13 +827,36 @@ static int CreateSwapchain (void)
     }
     free (images);
 
-    // Opaque on a VR headset; take what the runtime lists first.
+    // Take what the runtime lists first, which it prefers. OpenXR
+    // offers additive only on see-through displays, whatever mode
+    // is used: the Xreal Aura lists opaque first, but its optics
+    // still show black as the room behind it.
     count = 0;
+    seethrough = 0;
     blendmode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
     if (XR_SUCCEEDED (xrEnumerateEnvironmentBlendModes (instance, systemid,
 		XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO, 8, &count, modes))
 	&& count)
+    {
+	if (count > 8)
+	    count = 8;
 	blendmode = modes[0];
+	for (i = 0; i < count; i++)
+	{
+	    printf ("XR: blend mode %s\n", BlendName (modes[i]));
+	    if (modes[i] == XR_ENVIRONMENT_BLEND_MODE_ADDITIVE)
+		seethrough = 1;
+	}
+    }
+    printf ("XR: using blend mode %s%s\n", BlendName (blendmode),
+	    seethrough ? " on a see-through display" : "");
+
+    // So dark scenes do not vanish into the room, black is lifted
+    // there unless -xrlift says otherwise.
+    if (blacklift < 0)
+	blacklift = seethrough ? ADDITIVELIFT : 0;
+    if (blacklift > 0)
+	printf ("XR: black lifted to %d%%\n", (int)(blacklift * 100 + 0.5f));
 
     printf ("XR: %dx%d swapchain, %u images, format 0x%llx\n",
 	    IMAGEWIDTH, IMAGEHEIGHT, numimages,
@@ -893,6 +967,17 @@ static const xrbind_t wmrbinds[] =
     { &act_menu,	L "menu/click" },
 };
 
+// XR_EXT_hand_interaction: a right pinch fires, a left one uses,
+// and a grasp (closed hand) opens the automap or the menu. The
+// runtime turns the pinch strength into a press.
+static const xrbind_t handbinds[] =
+{
+    { &act_fire,	R "pinch_ext/value" },
+    { &act_use,		L "pinch_ext/value" },
+    { &act_map,		R "grasp_ext/value" },
+    { &act_menu,	L "grasp_ext/value" },
+};
+
 static int CreateActions (void)
 {
     XrActionSetCreateInfo		setinfo = { XR_TYPE_ACTION_SET_CREATE_INFO };
@@ -924,6 +1009,10 @@ static int CreateActions (void)
     Suggest ("/interaction_profiles/microsoft/motion_controller",
 	     wmrbinds, NUMBINDS (wmrbinds));
 
+    if (havehands)
+	Suggest ("/interaction_profiles/ext/hand_interaction_ext",
+		 handbinds, NUMBINDS(handbinds));
+
     attach.countActionSets = 1;
     attach.actionSets = &actionset;
     return Check (xrAttachSessionActionSets (session, &attach),
@@ -931,10 +1020,18 @@ static int CreateActions (void)
 }
 
 
-int XR_Init (float distance, float width)
+void XR_Stats (int on)
+{
+    stats = on;
+}
+
+
+int XR_Init (float distance, float width, float lift)
 {
     screendistance = distance;
-    screenwidth = width;
+    fitscreen = width <= 0;
+    screenwidth = fitscreen ? MAXWIDTH : width;
+    blacklift = lift;
 
     if (!CreateInstance ()
 	|| !GetSystem ()
@@ -947,8 +1044,9 @@ int XR_Init (float distance, float width)
 	return 0;
     }
 
-    printf ("XR: session created, screen %.1fm wide at %.1fm\n",
-	    screenwidth, screendistance);
+    printf ("XR: session created, screen %.1fm wide at %.1fm%s\n",
+	    screenwidth, screendistance,
+	    fitscreen ? " (until the field of view is known)" : "");
     return 1;
 }
 
@@ -988,6 +1086,7 @@ void XR_Shutdown (void)
     buttons = 0;
     state = XR_SESSION_STATE_UNKNOWN;
     lost = NULL;
+    lastwait = 0;
     SetVsync (1);
 }
 
@@ -995,6 +1094,12 @@ void XR_Shutdown (void)
 int XR_Active (void)
 {
     return session != XR_NULL_HANDLE;
+}
+
+
+float XR_BlackLift (void)
+{
+    return XR_Active () && blacklift > 0 ? blacklift : 0;
 }
 
 
@@ -1246,6 +1351,110 @@ static int WaitImage (void)
 }
 
 
+//
+// CountFrame
+// With -xrstats, how often xrWaitFrame let a frame through. DOOM
+// makes a frame each 35th of a second, so on a faster display most
+// frames span a few periods (the compositor fills in); one taking
+// over 1.5 tics, or 1.5 periods on a slower display, was late.
+//
+static double Now (void)
+{
+    struct timespec	ts;
+
+    clock_gettime (CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec + ts.tv_nsec / 1e9;
+}
+
+static void CountFrame (XrDuration period)
+{
+    double	now = Now ();
+    double	gap;
+    double	p = period / 1e9;
+    double	tic = p > 1.0 / 35 ? p : 1.0 / 35;
+
+    if (lastwait > 0)
+    {
+	gap = now - lastwait;
+	statframes++;
+	if (gap > tic * 1.5)
+	    statlate++;
+	if (gap > statworst)
+	    statworst = gap;
+    }
+    else
+	statstart = now;
+    lastwait = now;
+
+    if (now - statstart >= STATSECONDS)
+    {
+	printf ("XR: %d frames in %.1fs (%.1f/s), display period %.1fms,"
+		" %d late, worst %.1fms\n", statframes, now - statstart,
+		statframes / (now - statstart), p * 1000, statlate,
+		statworst * 1000);
+	statstart = now;
+	statframes = statlate = 0;
+	statworst = 0;
+    }
+}
+
+
+//
+// FitScreen
+// Without -xrwidth, sizes the screen once to the eyes' field of
+// view: glasses such as the Xreal Aura see much less than a VR
+// headset. The narrowest half angle of either eye, as the screen
+// is centered, and never wider than MAXWIDTH.
+//
+static void FitScreen (XrTime time)
+{
+    XrViewLocateInfo	info = { XR_TYPE_VIEW_LOCATE_INFO };
+    XrViewState		vs = { XR_TYPE_VIEW_STATE };
+    XrView		views[2];
+    uint32_t		count;
+    uint32_t		i;
+    float		h;
+    float		v;
+    float		w;
+    XrResult		r;
+
+    for (i = 0; i < 2; i++)
+    {
+	memset (&views[i], 0, sizeof(views[i]));
+	views[i].type = XR_TYPE_VIEW;
+    }
+    info.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
+    info.displayTime = time;
+    info.space = space;
+    count = 0;
+    r = xrLocateViews (session, &info, &vs, 2, &count, views);
+    if (XR_FAILED (r) || !count)
+	return;
+    fitscreen = 0;
+
+    h = v = 1.5f;
+    for (i = 0; i < count && i < 2; i++)
+    {
+	if (-views[i].fov.angleLeft < h)	h = -views[i].fov.angleLeft;
+	if (views[i].fov.angleRight < h)	h = views[i].fov.angleRight;
+	if (-views[i].fov.angleDown < v)	v = -views[i].fov.angleDown;
+	if (views[i].fov.angleUp < v)		v = views[i].fov.angleUp;
+    }
+    printf ("XR: field of view %.0f x %.0f degrees (narrowest half"
+	    " angles doubled)\n", h * 2 * 57.29578f, v * 2 * 57.29578f);
+    if (h <= 0 || v <= 0)
+	return;
+
+    w = 2 * screendistance * tanf (h * FITFOV);
+    if (w > 2 * screendistance * tanf (v * FITFOV) * 4.0f / 3.0f)
+	w = 2 * screendistance * tanf (v * FITFOV) * 4.0f / 3.0f;
+    if (w > MAXWIDTH)
+	w = MAXWIDTH;
+    screenwidth = w;
+    printf ("XR: screen %.2fm wide at %.1fm\n", screenwidth, screendistance);
+}
+
+
 void XR_Present (xr_draw_t draw)
 {
     XrFrameWaitInfo		waitinfo = { XR_TYPE_FRAME_WAIT_INFO };
@@ -1263,9 +1472,14 @@ void XR_Present (xr_draw_t draw)
     r = xrWaitFrame (session, &waitinfo, &frame);
     if (Lost (r) || !Check (r, "xrWaitFrame"))
 	return;
+    if (stats)
+	CountFrame (frame.predictedDisplayPeriod);
     r = xrBeginFrame (session, &begininfo);
     if (Lost (r) || !Check (r, "xrBeginFrame"))
 	return;
+
+    if (fitscreen)
+	FitScreen (frame.predictedDisplayTime);
 
     endinfo.displayTime = frame.predictedDisplayTime;
     endinfo.environmentBlendMode = blendmode;

@@ -176,12 +176,16 @@ static void I_PostXRButtons (void)
 // Without a runtime or headset the game is played in the window,
 // as with -noxr, which does not try (-xrflat, once needed for
 // that, is still accepted). -xrdist and -xrwidth place
-// the screen.
+// the screen; without -xrwidth it is fitted to the field of view.
+// -xrlift N raises black to N% of white (default: 12 on
+// see-through glasses, 0 on other headsets). -xrstats logs frame
+// pacing.
 //
 static void I_InitXR (void)
 {
     float	distance = 2.5f;
-    float	width = 3.2f;
+    float	width = 0;
+    float	lift = -1;
     int		p;
 
     if (M_CheckParm ("-noxr"))
@@ -193,8 +197,18 @@ static void I_InitXR (void)
     p = M_CheckParm ("-xrwidth");
     if (p && p < myargc-1 && atof (myargv[p+1]) > 0)
 	width = atof (myargv[p+1]);
+    p = M_CheckParm ("-xrlift");
+    if (p && p < myargc-1)
+    {
+	lift = atof (myargv[p+1]) / 100.0f;
+	if (lift < 0)
+	    lift = 0;
+	if (lift > 0.5f)
+	    lift = 0.5f;
+    }
 
-    if (!XR_Init (distance, width))
+    XR_Stats (M_CheckParm ("-xrstats") != 0);
+    if (!XR_Init (distance, width, lift))
 	printf ("XR: no headset, playing in the window\n");
 }
 #endif

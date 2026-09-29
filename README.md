@@ -301,6 +301,10 @@ Reality) are mapped to your key bindings:
 | Left trigger                    | Run               | Backspace     |
 | Right B, or right menu          | Automap           | Backspace     |
 | Left menu (Index: left B)       | Menu (Esc)        | Esc           |
+| Hands (`XR_EXT_hand_interaction`): right pinch | Fire | Enter    |
+| Left pinch                      | Use               | Enter         |
+| Right grasp (closed hand)       | Automap           | Backspace     |
+| Left grasp                      | Menu (Esc)        | Esc           |
 
 In a yes/no prompt, such as "are you sure you want to quit?", fire or
 use answers yes, run or automap answers no, and menu cancels. So to
@@ -311,7 +315,9 @@ quit, press menu, pick Quit Game with fire, then press fire again.
 | `-xrflat`       | Accepted for older scripts; playing in the window without a runtime or headset is now the default |
 | `-noxr`         | Play in the window without trying OpenXR             |
 | `-xrdist M`     | Screen distance in meters (default 2.5)              |
-| `-xrwidth M`    | Screen width in meters (default 3.2)                 |
+| `-xrwidth M`    | Screen width in meters (default: fitted to the field of view, at most 3.2) |
+| `-xrlift N`     | Raise black to N% of white, 0 to 50 (default 12 on see-through glasses, 0 on other headsets) |
+| `-xrstats`      | Log frame pacing every 10 seconds                    |
 
 On the desktop only OpenGL on X11 is supported (`XR_KHR_opengl_enable`
 with GLX), which is how raylib runs on Linux; the Android APK uses
@@ -393,6 +399,26 @@ Both flavors have been run on XREAL's Project Aura glasses (Android
 XR, Adreno, OpenGL ES 3.2) and on the `x86_64` Android XR emulator;
 the `flat` one also on a plain `x86_64` phone emulator image. The
 shared `i_xr.c` code is also tested on Monado on the desktop.
+
+On see-through glasses such as the Aura (70° diagonal, about 58° x
+34° per eye) two things differ from a VR headset:
+
+- Their optics add the picture to the room, so black is transparent
+  and DOOM's dark areas vanish. The runtime lists the `additive`
+  blend mode for them (the Aura lists `opaque` first, but offers
+  `additive`), and then the game raises black to 12% of white,
+  scaling the rest so white stays white: dark rooms show as a dim
+  image. `-xrlift N` sets another level (`-xrlift 0` turns it off),
+  and DOOM's own gamma (F11, or the options menu) brightens the mid
+  tones on top.
+- The screen is sized to the field of view the runtime reports: at
+  2.5 m it is 1.85 m wide on the Aura, so the whole 4:3 picture,
+  status bar included, is in view. `-xrwidth` still sets it.
+
+Hand tracking works without a controller, through
+`XR_EXT_hand_interaction` (see the controls above); the Aura's
+runtime picks that profile for both hands. A Bluetooth gamepad pairs
+with the compute puck and plays as on a phone.
 
 ## What changed
 

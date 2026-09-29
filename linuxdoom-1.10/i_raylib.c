@@ -144,6 +144,9 @@ static void DrawXR (unsigned int fbo, int width, int height)
     RenderTexture2D	target = { 0 };
     Rectangle		src;
     Rectangle		dst;
+    float		lift = XR_BlackLift ();
+    unsigned char	scale = (unsigned char)(255.0f * (1.0f - lift) + 0.5f);
+    unsigned char	bias = (unsigned char)(255.0f * lift + 0.5f);
 
     target.id = fbo;
     target.texture.width = width;
@@ -154,7 +157,16 @@ static void DrawXR (unsigned int fbo, int width, int height)
 
     BeginTextureMode (target);
     ClearBackground (BLACK);
-    DrawTexturePro (screentex, src, dst, (Vector2) { 0, 0 }, 0.0f, WHITE);
+    // lift + (1 - lift) * color: black becomes a dim gray that
+    // see-through glasses still show, white stays white.
+    DrawTexturePro (screentex, src, dst, (Vector2) { 0, 0 }, 0.0f,
+		    (Color) { scale, scale, scale, 255 });
+    if (bias)
+    {
+	BeginBlendMode (BLEND_ADDITIVE);
+	DrawRectangle (0, 0, width, height, (Color) { bias, bias, bias, 255 });
+	EndBlendMode ();
+    }
     EndTextureMode ();
 }
 #endif
