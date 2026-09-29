@@ -43,9 +43,17 @@ static XrResult	fake_waitresult;
 static XrResult	fake_releaseresult;
 static uint32_t	fake_acquireindex;
 
+// Session states xrPollEvent hands out, one per call, and what
+// it returns once they are gone.
+static XrSessionState	fake_states[4];
+static int		fake_numstates;
+static int		fake_nextstate;
+static XrResult		fake_pollresult = XR_EVENT_UNAVAILABLE;
+
 static int	acquires, waits, releases, draws, endframes;
 static uint32_t	lastlayers;
 static int	loadedfbos, unloadedfbos;
+static int	swapinterval = -1;	// last glfwSwapInterval
 
 
 XRAPI_ATTR XrResult XRAPI_CALL xrEnumerateInstanceExtensionProperties (
@@ -159,6 +167,35 @@ XRAPI_ATTR XrResult XRAPI_CALL xrDestroySession (XrSession h)
 XRAPI_ATTR XrResult XRAPI_CALL xrDestroyInstance (XrInstance h)
 { (void)h; return XR_SUCCESS; }
 
+XRAPI_ATTR XrResult XRAPI_CALL xrPollEvent (
+    XrInstance inst, XrEventDataBuffer* ev)
+{
+    XrEventDataSessionStateChanged*	sc;
+
+    (void)inst;
+    if (fake_nextstate >= fake_numstates)
+	return fake_pollresult;
+    sc = (XrEventDataSessionStateChanged*)ev;
+    memset (sc, 0, sizeof(*sc));
+    sc->type = XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED;
+    sc->state = fake_states[fake_nextstate++];
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL xrBeginSession (
+    XrSession s, const XrSessionBeginInfo* info)
+{
+    (void)s;
+    (void)info;
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL xrEndSession (XrSession s)
+{
+    (void)s;
+    return XR_SUCCESS;
+}
+
 XRAPI_ATTR XrResult XRAPI_CALL xrWaitFrame (
     XrSession s, const XrFrameWaitInfo* info, XrFrameState* frame)
 {
@@ -239,6 +276,13 @@ bool rlFramebufferComplete (unsigned int fbo)
     return (int)fbo - 1 != fake_incompletefbo;
 }
 
+
+// raylib's GLFW, which i_xr.c only has a weak reference to.
+void glfwSwapInterval (int interval)
+{
+    swapinterval = interval;
+}
+
 void rlUnloadFramebuffer (unsigned int fbo)
 {
     (void)fbo;
@@ -269,7 +313,10 @@ static void Reset (void)
     acquires = waits = releases = draws = endframes = 0;
     lastlayers = 0;
     loadedfbos = unloadedfbos = 0;
+    fake_numstates = fake_nextstate = 0;
+    fake_pollresult = XR_EVENT_UNAVAILABLE;
     quit = 0;
+    swapinterval = -1;
 }
 
 
@@ -392,17 +439,108 @@ static void TestReleaseFails (void)
 	    "next frame: %d acquires, %u layers", acquires, lastlayers);
 }
 
-// A lost session stops the game without releasing the image.
+// A lost session stops using OpenXR without releasing the image,
+// and the next update drops it; the game goes on in the window.
 static void TestWaitLost (void)
 {
     Reset ();
     StartSession ();
+    instance = (XrInstance)(uintptr_t)1;
     fake_waitresult = XR_ERROR_SESSION_LOST;
     XR_Present (Draw);
-    Expect (quit && !running, "session lost: game goes on");
+    Expect (lost && !running && !quit, "session lost: not noticed");
     Expect (releases == 0 && lastlayers == 0 && endframes == 1,
 	    "session lost: %d releases, %u layers, %d frames",
 	    releases, lastlayers, endframes);
+
+    XR_Present (Draw);
+    Expect (endframes == 1, "session lost: %d frames", endframes);
+    Expect (XR_Update (), "session lost: game quits");
+    Expect (!XR_Active () && instance == XR_NULL_HANDLE && !lost,
+	    "session lost: OpenXR kept");
+    Expect (XR_Update (), "after session lost: game quits");
+}
+
+// A lost instance, reported by xrPollEvent, does the same.
+static void TestPollLost (void)
+{
+    Reset ();
+    StartSession ();
+    instance = (XrInstance)(uintptr_t)1;
+    fake_pollresult = XR_ERROR_INSTANCE_LOST;
+    Expect (XR_Update (), "instance lost: game quits");
+    Expect (!XR_Active (), "instance lost: OpenXR kept");
+}
+
+// LOSS_PENDING goes on in the window; EXITING quits.
+static void TestLossPending (void)
+{
+    Reset ();
+    StartSession ();
+    instance = (XrInstance)(uintptr_t)1;
+    fake_states[0] = XR_SESSION_STATE_LOSS_PENDING;
+    fake_numstates = 1;
+    Expect (XR_Update (), "loss pending: game quits");
+    Expect (!XR_Active (), "loss pending: OpenXR kept");
+}
+
+static void TestExiting (void)
+{
+    Reset ();
+    StartSession ();
+    instance = (XrInstance)(uintptr_t)1;
+    fake_states[0] = XR_SESSION_STATE_EXITING;
+    fake_numstates = 1;
+    Expect (!XR_Update (), "exiting: game goes on");
+}
+
+// The window's vsync is off only while the session runs.
+static void TestVsync (void)
+{
+    Reset ();
+    StartSession ();
+    instance = (XrInstance)(uintptr_t)1;
+    running = 0;
+    fake_states[0] = XR_SESSION_STATE_READY;
+    fake_numstates = 1;
+    XR_Update ();
+    Expect (running && swapinterval == 0,
+	    "session running: swap interval %d", swapinterval);
+    fake_states[1] = XR_SESSION_STATE_STOPPING;
+    fake_numstates = 2;
+    XR_Update ();
+    Expect (!running && swapinterval == 1,
+	    "session stopped: swap interval %d", swapinterval);
+
+    fake_states[2] = XR_SESSION_STATE_READY;
+    fake_numstates = 3;
+    XR_Update ();
+    swapinterval = -1;
+    fake_waitresult = XR_ERROR_SESSION_LOST;
+    XR_Present (Draw);
+    XR_Update ();
+    Expect (!XR_Active () && swapinterval == 1,
+	    "session lost: swap interval %d", swapinterval);
+}
+
+// PRIME offload leaves alone a vendor the user chose, and is off
+// with DOOM_XR_PRIME=0.
+static void TestPrime (void)
+{
+    setenv ("__GLX_VENDOR_LIBRARY_NAME", "mesa", 1);
+    unsetenv ("__NV_PRIME_RENDER_OFFLOAD");
+    XR_PrepareGL ();
+    Expect (!strcmp (getenv ("__GLX_VENDOR_LIBRARY_NAME"), "mesa")
+	    && !getenv ("__NV_PRIME_RENDER_OFFLOAD"),
+	    "PRIME: user's GLX vendor replaced");
+
+    unsetenv ("__GLX_VENDOR_LIBRARY_NAME");
+    setenv ("DOOM_XR_PRIME", "0", 1);
+    XR_PrepareGL ();
+    Expect (!getenv ("__GLX_VENDOR_LIBRARY_NAME")
+	    && !getenv ("__NV_PRIME_RENDER_OFFLOAD"),
+	    "PRIME: on with DOOM_XR_PRIME=0");
+    unsetenv ("DOOM_XR_PRIME");
 }
 
 // An index past the swapchain is released unshown, not drawn.
@@ -430,6 +568,11 @@ int main (void)
     TestWaitTimesOut ();
     TestReleaseFails ();
     TestWaitLost ();
+    TestPollLost ();
+    TestLossPending ();
+    TestExiting ();
+    TestVsync ();
+    TestPrime ();
     TestBadIndex ();
     Reset ();
 

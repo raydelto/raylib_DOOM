@@ -164,8 +164,10 @@ static void I_PostXRButtons (void)
 
 //
 // I_InitXR
-// -xrflat plays in the window when there is no headset;
-// -noxr always does. -xrdist and -xrwidth place the screen.
+// Without a runtime or headset the game is played in the window,
+// as with -noxr, which does not try (-xrflat, once needed for
+// that, is still accepted). -xrdist and -xrwidth place
+// the screen.
 //
 static void I_InitXR (void)
 {
@@ -183,17 +185,8 @@ static void I_InitXR (void)
     if (p && p < myargc-1 && atof (myargv[p+1]) > 0)
 	width = atof (myargv[p+1]);
 
-    if (XR_Init (distance, width))
-	return;
-
-    if (M_CheckParm ("-xrflat"))
-    {
-	printf ("XR: no headset, playing in the window (-xrflat)\n");
-	return;
-    }
-    I_Error ("No OpenXR headset (see the XR: lines above).\n"
-	     "Start an OpenXR runtime such as monado-service, or run\n"
-	     "with -xrflat to play in a window without one.");
+    if (!XR_Init (distance, width))
+	printf ("XR: no headset, playing in the window\n");
 }
 #endif
 
@@ -397,6 +390,10 @@ void I_InitGraphics(void)
     if (scale < 1)
 	scale = 1;
 
+#ifdef DOOM_XR
+    if (!M_CheckParm ("-noxr"))
+	XR_PrepareGL ();
+#endif
     RL_InitVideo (SCREENWIDTH, SCREENHEIGHT, scale,
 		  M_CheckParm("-fullscreen") != 0);
 

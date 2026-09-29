@@ -43,6 +43,11 @@ enum
     XR_NUMBUTTONS	= 11
 };
 
+// Before the window opens: puts OpenGL on the GPU the headset
+// most likely uses (NVIDIA PRIME offload, when that driver is
+// loaded), unless DOOM_XR_PRIME=0.
+void XR_PrepareGL (void);
+
 // Connects to the OpenXR runtime and creates a session on the
 // current OpenGL (GLX) context, so the window must be open.
 // distance and width place the virtual screen, in meters.
@@ -55,6 +60,8 @@ int XR_Active (void);
 
 // Handles runtime events (session state changes) and reads the
 // controllers. Returns 0 once the runtime wants the game to quit.
+// If the runtime went away, says so and shuts OpenXR down, so the
+// game goes on in the window.
 int XR_Update (void);
 
 // Buttons held, as of the last XR_Update.
