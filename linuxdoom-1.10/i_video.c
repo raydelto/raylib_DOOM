@@ -39,6 +39,9 @@ rcsid[] = "$Id: i_x.c,v 1.6 1997/02/03 22:45:10 b1 Exp $";
 #include "doomdef.h"
 
 #include "i_raylib.h"
+#ifdef DOOM_XR
+#include "i_xr.h"
+#endif
 
 #ifdef __GNUG__
 #pragma implementation "i_video.h"
@@ -47,6 +50,133 @@ rcsid[] = "$Id: i_x.c,v 1.6 1997/02/03 22:45:10 b1 Exp $";
 
 
 extern int	usemouse;
+
+
+#ifdef DOOM_XR
+//
+// Headset controllers.
+// The buttons become the keys they stand for: the player's key
+// bindings in the game, the fixed menu keys while it is up.
+//
+extern int	key_right;
+extern int	key_left;
+extern int	key_up;
+extern int	key_down;
+extern int	key_strafeleft;
+extern int	key_straferight;
+extern int	key_fire;
+extern int	key_use;
+extern int	key_speed;
+
+static unsigned	xrheld;
+
+// Key sent for each held button, so its release matches even if
+// the menu opened or closed in between.
+static int	xrkeys[XR_NUMBUTTONS];
+
+static int XRKey (unsigned button)
+{
+    if (menuactive)
+    {
+	switch (button)
+	{
+	  case XR_FORWARD:	return KEY_UPARROW;
+	  case XR_BACK:		return KEY_DOWNARROW;
+	  case XR_TURNLEFT:
+	  case XR_STRAFELEFT:	return KEY_LEFTARROW;
+	  case XR_TURNRIGHT:
+	  case XR_STRAFERIGHT:	return KEY_RIGHTARROW;
+	  case XR_FIRE:
+	  case XR_USE:		return KEY_ENTER;
+	  case XR_RUN:
+	  case XR_MAP:		return KEY_BACKSPACE;
+	  case XR_MENU:		return KEY_ESCAPE;
+	}
+	return 0;
+    }
+
+    switch (button)
+    {
+      case XR_FORWARD:		return key_up;
+      case XR_BACK:		return key_down;
+      case XR_TURNLEFT:		return key_left;
+      case XR_TURNRIGHT:	return key_right;
+      case XR_STRAFELEFT:	return key_strafeleft;
+      case XR_STRAFERIGHT:	return key_straferight;
+      case XR_FIRE:		return key_fire;
+      case XR_USE:		return key_use;
+      case XR_RUN:		return key_speed;
+      case XR_MENU:		return KEY_ESCAPE;
+      case XR_MAP:		return KEY_TAB;
+    }
+    return 0;
+}
+
+static void I_PostXRButtons (void)
+{
+    unsigned	now;
+    unsigned	bit;
+    int		i;
+    event_t	event;
+
+    now = XR_Buttons ();
+    for (i = 0; i < XR_NUMBUTTONS; i++)
+    {
+	bit = 1u << i;
+	if (!((now ^ xrheld) & bit))
+	    continue;
+
+	if (now & bit)
+	{
+	    xrkeys[i] = XRKey (bit);
+	    event.type = ev_keydown;
+	}
+	else
+	    event.type = ev_keyup;
+
+	event.data1 = xrkeys[i];
+	event.data2 = event.data3 = 0;
+	if (event.data1)
+	    D_PostEvent (&event);
+    }
+    xrheld = now;
+}
+
+
+//
+// I_InitXR
+// -xrflat plays in the window when there is no headset;
+// -noxr always does. -xrdist and -xrwidth place the screen.
+//
+static void I_InitXR (void)
+{
+    float	distance = 2.5f;
+    float	width = 3.2f;
+    int		p;
+
+    if (M_CheckParm ("-noxr"))
+	return;
+
+    p = M_CheckParm ("-xrdist");
+    if (p && p < myargc-1 && atof (myargv[p+1]) > 0)
+	distance = atof (myargv[p+1]);
+    p = M_CheckParm ("-xrwidth");
+    if (p && p < myargc-1 && atof (myargv[p+1]) > 0)
+	width = atof (myargv[p+1]);
+
+    if (XR_Init (distance, width))
+	return;
+
+    if (M_CheckParm ("-xrflat"))
+    {
+	printf ("XR: no headset, playing in the window (-xrflat)\n");
+	return;
+    }
+    I_Error ("No OpenXR headset (see the XR: lines above).\n"
+	     "Start an OpenXR runtime such as monado-service, or run\n"
+	     "with -xrflat to play in a window without one.");
+}
+#endif
 
 // Current palette as RGBA bytes, gamma applied.
 static byte	palette[256*4];
@@ -127,6 +257,12 @@ void I_StartTic (void)
 	event.data3 = rlev.data3;
 	D_PostEvent (&event);
     }
+
+#ifdef DOOM_XR
+    if (!XR_Update ())
+	I_Quit ();
+    I_PostXRButtons ();
+#endif
 
     UpdateMouseGrab ();
 }
@@ -244,4 +380,8 @@ void I_InitGraphics(void)
 
     RL_InitVideo (SCREENWIDTH, SCREENHEIGHT, scale,
 		  M_CheckParm("-fullscreen") != 0);
+
+#ifdef DOOM_XR
+    I_InitXR ();
+#endif
 }

@@ -29,6 +29,9 @@
 #include "raylib.h"
 
 #include "i_raylib.h"
+#ifdef DOOM_XR
+#include "i_xr.h"
+#endif
 
 
 #define WINDOWTITLE	"DOOM"
@@ -99,11 +102,44 @@ void RL_ShutdownVideo (void)
 	return;
 
     WSL_Shutdown ();
+#ifdef DOOM_XR
+    // While raylib's GL context, which the session uses, is alive.
+    XR_Shutdown ();
+#endif
     if (prescale)
 	UnloadRenderTexture (prescaled);
     UnloadTexture (screentex);
     CloseWindow ();
 }
+
+
+#ifdef DOOM_XR
+//
+// DrawXR
+// Fills the headset's virtual screen. 320x200 onto its 1600x1200
+// is a whole 5x6, so nearest filtering keeps every pixel even.
+// Drawn the way raylib draws render textures, which is the right
+// way up for OpenXR's bottom-left GL image origin.
+//
+static void DrawXR (unsigned int fbo, int width, int height)
+{
+    RenderTexture2D	target = { 0 };
+    Rectangle		src;
+    Rectangle		dst;
+
+    target.id = fbo;
+    target.texture.width = width;
+    target.texture.height = height;
+
+    src = (Rectangle) { 0, 0, (float)screenwidth, (float)screenheight };
+    dst = (Rectangle) { 0, 0, (float)width, (float)height };
+
+    BeginTextureMode (target);
+    ClearBackground (BLACK);
+    DrawTexturePro (screentex, src, dst, (Vector2) { 0, 0 }, 0.0f, WHITE);
+    EndTextureMode ();
+}
+#endif
 
 
 void RL_Present (const unsigned char* rgba)
@@ -118,6 +154,13 @@ void RL_Present (const unsigned char* rgba)
     Rectangle	dst;
 
     UpdateTexture (screentex, rgba);
+
+#ifdef DOOM_XR
+    // The headset first; the window keeps a mirror of the game,
+    // and the keyboard and mouse.
+    if (XR_Active ())
+	XR_Present (DrawXR);
+#endif
 
     // Letterbox to 4:3.
     winw = (float)GetScreenWidth ();
