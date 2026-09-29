@@ -66,6 +66,27 @@ jobs:
             build-web/raylibdoom.data
             build-web/freedoom-COPYING.txt
 
+  ps2:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The ps2dev/ps2dev toolchain with raylib4PlayStation2 built in
+      # (packaging/ps2/Dockerfile). Run with docker, not as the job's
+      # container: actions like checkout can't run in its Alpine.
+      - name: Build the toolchain image
+        run: docker build -t raylibdoom-ps2 packaging/ps2
+
+      - name: Build
+        run: >
+          docker run --rm -v "$PWD:/src" -w /src raylibdoom-ps2
+          packaging/ps2/build.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: raylibdoom-ps2
+          path: build-ps2/DOOM.ELF
+
   android:
     runs-on: ubuntu-latest
     steps:
