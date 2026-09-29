@@ -123,9 +123,21 @@ if(RAYLIB_DOOM_XR)
     message(FATAL_ERROR "RAYLIB_DOOM_XR supports only Linux (OpenGL on X11)")
   endif()
 
-  # The system loader (libopenxr-dev on Debian/Ubuntu), else the SDK's.
+  # The system loader (libopenxr-dev on Debian/Ubuntu), found by
+  # its CMake config or, for loaders built without one, by
+  # pkg-config; else the SDK's.
   find_package(OpenXR CONFIG QUIET)
-  if(NOT OpenXR_FOUND)
+  if(NOT TARGET OpenXR::openxr_loader)
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+      pkg_check_modules(OPENXR QUIET IMPORTED_TARGET GLOBAL openxr)
+    endif()
+    if(OPENXR_FOUND)
+      message(STATUS "Using the OpenXR loader found by pkg-config")
+      add_library(OpenXR::openxr_loader ALIAS PkgConfig::OPENXR)
+    endif()
+  endif()
+  if(NOT TARGET OpenXR::openxr_loader)
     message(STATUS "No OpenXR SDK installed, building the OpenXR loader")
     include(FetchContent)
     set(BUILD_TESTS OFF CACHE BOOL "" FORCE)
