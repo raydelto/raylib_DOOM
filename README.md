@@ -313,9 +313,86 @@ quit, press menu, pick Quit Game with fire, then press fire again.
 | `-xrdist M`     | Screen distance in meters (default 2.5)              |
 | `-xrwidth M`    | Screen width in meters (default 3.2)                 |
 
-Only OpenGL on X11 is supported (`XR_KHR_opengl_enable` with GLX), which
-is how raylib runs on Linux. See the top of `linuxdoom-1.10/i_xr.c` for
+On the desktop only OpenGL on X11 is supported (`XR_KHR_opengl_enable`
+with GLX), which is how raylib runs on Linux; the Android APK uses
+OpenGL ES on EGL (see [Android and Android XR](#android-and-android-xr)). See the top of `linuxdoom-1.10/i_xr.c` for
 how the frame reaches the headset.
+
+## Android and Android XR
+
+`android/` is a Gradle project that builds the game as an APK with
+no Java: `CMakeLists.txt`, configured by the NDK with
+`-DRAYLIB_DOOM_ANDROID=ON`, makes `libraylibdoom.so`, which
+`NativeActivity` loads (raylib's `PLATFORM=Android`). The desktop,
+Windows, macOS, web and OpenXR builds are not affected; the option is
+off unless Gradle sets it. There are two flavors, each for
+`arm64-v8a` (devices) and `x86_64` (the emulator):
+
+| Flavor | Package              | What it is |
+| ------ | -------------------- | ---------- |
+| `flat` | `com.raylib.doom`    | A normal Android app (OpenGL ES 2) for phones, tablets and TVs. On Android XR it opens as a 4:3 panel in the Home Space. |
+| `xr`   | `com.raylib.doom.xr` | The same with OpenXR (OpenGL ES 3, `XR_KHR_opengl_es_enable`, the Khronos loader AAR): on Android XR it starts in Full Space and shows the game on the virtual screen of [VR headsets](#vr-headsets-openxr). Without a runtime or headset it logs why and plays as the flat app. |
+
+You need the Android SDK with NDK 28.1.13356709 and CMake 3.22.1
+(Android Studio's SDK Manager, or `sdkmanager "ndk;28.1.13356709"
+"cmake;3.22.1"`), and JDK 17 or newer. The Gradle wrapper fetches
+Gradle and the Android Gradle plugin. With `ANDROID_HOME` set, or
+`sdk.dir` in `android/local.properties`:
+
+```sh
+cd android
+./gradlew assembleFlatDebug assembleXrDebug
+# app/build/outputs/apk/flat/debug/app-flat-debug.apk
+# app/build/outputs/apk/xr/debug/app-xr-debug.apk
+```
+
+The APKs bundle Freedoom: Phase 1 (`freedoom1.wad`, BSD licensed,
+with its `COPYING.txt`), which Gradle downloads and checks against its
+SHA-256 like the web build; `-PfreedoomZip=/path/to/freedoom-0.13.0.zip`
+uses a zip you already have. No other IWAD is bundled. The `android`
+job in `.github/workflows/build.yml` uploads both debug APKs as the
+`raylibdoom-android` artifact.
+
+Install and start one with `adb`:
+
+```sh
+adb install -r app/build/outputs/apk/flat/debug/app-flat-debug.apk
+adb shell am start -n com.raylib.doom/android.app.NativeActivity
+adb logcat -s raylibdoom        # DOOM's console output
+```
+
+(`com.raylib.doom.xr/android.app.NativeActivity` for the `xr`
+flavor.) On the first run the WAD is copied into the app's internal
+storage (`/data/user/0/<package>/files`), which is also where the
+settings (`.doomrc`) and saved games go. To play another IWAD or a
+PWAD, or to pass options, put them there, with a command line in
+`args.txt`:
+
+```sh
+adb push doom2.wad /data/local/tmp/
+adb shell run-as com.raylib.doom cp /data/local/tmp/doom2.wad files/
+echo '-iwad doom2.wad -warp 1 -skill 4' > args.txt
+adb push args.txt /data/local/tmp/
+adb shell run-as com.raylib.doom cp /data/local/tmp/args.txt files/
+```
+
+A Bluetooth or USB gamepad plays with the controller mapping of the
+[VR headsets](#vr-headsets-openxr) table: left stick (or d-pad up and
+down) moves and strafes, right stick (or d-pad left and right) turns,
+right trigger or X fires, A uses, left trigger runs, B or Y is the
+automap and Start is the menu. On a touchscreen, buttons for turning,
+moving, fire, use, run, the menu and the automap are drawn over the
+picture; they hide once a gamepad is used and come back when the
+screen is touched. The system Back button is Esc.
+
+In the `xr` flavor the first run on a device logs the runtime's
+OpenXR extensions (`XR: runtime extension ...`), then the session's
+state changes. Android XR recommends Vulkan, but its runtime offers
+`XR_KHR_opengl_es_enable`, which is what raylib's EGL context needs.
+Both flavors have been run on XREAL's Project Aura glasses (Android
+XR, Adreno, OpenGL ES 3.2) and on the `x86_64` Android XR emulator;
+the `flat` one also on a plain `x86_64` phone emulator image. The
+shared `i_xr.c` code is also tested on Monado on the desktop.
 
 ## What changed
 
@@ -341,6 +418,11 @@ how the frame reaches the headset.
 - `i_xr.c` / `i_xr.h`: new, the OpenXR output of `raylib_doom_xr`
   (`-DRAYLIB_DOOM_XR=ON`), compiled into that target only;
   `tests/xr_test.c` tests it.
+- Android: `i_android.c` / `i_android.h` (logcat, the bundled IWAD,
+  the data folder, `args.txt`), the gamepad and touch controls in
+  `i_raylib.c`, and the EGL / OpenGL ES graphics binding and
+  `xrInitializeLoaderKHR` in `i_xr.c` for the `xr` flavor of the APK
+  in `android/`.
 - `doomkeys.h`: the key codes, split out of `doomdef.h`.
 - Browser build: `web/web.cmake` and `web/shell.html` (the page, with
   the IndexedDB mount and the WAD picker); `d_main.c` splits the game

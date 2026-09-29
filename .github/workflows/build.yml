@@ -65,3 +65,34 @@ jobs:
             build-web/raylibdoom.wasm
             build-web/raylibdoom.data
             build-web/freedoom-COPYING.txt
+
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      # The runner's SDK has the build tools; Gradle needs this NDK
+      # and CMake as well.
+      - name: Install the NDK and CMake
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "ndk;28.1.13356709" "cmake;3.22.1" > /dev/null
+
+      # Downloads Freedoom 0.13.0 (checked against its SHA-256) and
+      # builds raylib 5.5 for Android, then both flavors for
+      # arm64-v8a and x86_64.
+      - name: Build
+        working-directory: android
+        run: ./gradlew --no-daemon assembleFlatDebug assembleXrDebug
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: raylibdoom-android
+          path: |
+            android/app/build/outputs/apk/flat/debug/app-flat-debug.apk
+            android/app/build/outputs/apk/xr/debug/app-xr-debug.apk
