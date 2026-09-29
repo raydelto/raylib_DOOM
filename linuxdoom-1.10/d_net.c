@@ -711,6 +711,14 @@ void TryRunTics (void)
 	}
     }// demoplayback
 	
+#ifdef __EMSCRIPTEN__
+    // Spinning here would hold up the browser, which draws, plays
+    // the audio and delivers input only between frames. Come back
+    // next frame instead; D_RunFrame then skips drawing.
+    if (lowtic < gametic/ticdup + counts)
+	return;
+#endif
+
     // wait for new tics if needed
     while (lowtic < gametic/ticdup + counts)	
     {

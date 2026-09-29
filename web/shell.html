@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>raylib DOOM</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; color: #ddd;
+               font: 15px/1.4 system-ui, sans-serif; overflow: hidden; }
+  #canvas { display: block; width: 100vw; height: 100vh; outline: none; }
+  #overlay { position: fixed; inset: 0; display: flex; align-items: center;
+             justify-content: center; background: rgba(0, 0, 0, .82); }
+  #overlay.hidden, #hint.hidden, .hidden { display: none; }
+  #panel { width: min(30em, 90vw); text-align: center; }
+  h1 { margin: 0 0 .6em; font-size: 2em; color: #c33; letter-spacing: .08em; }
+  #bar { height: .6em; margin: 1em 0; border: 1px solid #555; }
+  #fill { height: 100%; width: 0; background: #c33; }
+  #status { min-height: 1.4em; white-space: pre-wrap; }
+  #status.error { color: #f66; text-align: left; font-family: monospace; }
+  #play { margin: 1em 0; padding: .5em 2em; font-size: 1.3em; cursor: pointer;
+          background: #c33; color: #fff; border: 0; border-radius: 4px; }
+  #play:disabled { background: #555; cursor: default; }
+  #wads { margin-top: 1em; font-size: .9em; color: #aaa; }
+  #wads button { margin: .3em; }
+  small { color: #888; }
+  a { color: #e88; }
+  #hint { position: fixed; top: .6em; left: 50%; transform: translateX(-50%);
+          padding: .3em .8em; background: rgba(0, 0, 0, .7); border-radius: 4px;
+          pointer-events: none; }
+</style>
+</head>
+<body>
+<canvas id="canvas" tabindex="-1"></canvas>
+<div id="hint" class="hidden">Click to capture the mouse</div>
+
+<div id="overlay">
+  <div id="panel">
+    <h1>raylib DOOM</h1>
+    <div id="bar"><div id="fill"></div></div>
+    <div id="status">Loading…</div>
+    <button id="play" disabled>Click to play</button>
+    <div id="wads">
+      <div>Playing: <span id="using">Freedoom: Phase 1</span></div>
+      <button id="pick" disabled>Load your own IWAD / PWAD…</button>
+      <button id="forget" class="hidden">Back to Freedoom</button>
+      <input id="picker" type="file" accept=".wad,.WAD" multiple class="hidden">
+    </div>
+    <p><small>Keyboard to play, mouse once captured (Esc lets go).
+      Alt+Enter: fullscreen. Saved games and settings stay in this browser.
+      <a href="freedoom-COPYING.txt">Freedoom license</a>.</small></p>
+  </div>
+</div>
+
+<script>
+(function () {
+  var canvas = document.getElementById('canvas');
+  var overlay = document.getElementById('overlay');
+  var fill = document.getElementById('fill');
+  var statusEl = document.getElementById('status');
+  var play = document.getElementById('play');
+  var using = document.getElementById('using');
+  var picker = document.getElementById('picker');
+  var forget = document.getElementById('forget');
+  var hint = document.getElementById('hint');
+  var WADDIR = '/save/wads';
+  var running = false;
+  var failed = false;
+  var lastlines = [];
+
+  // WADs picked earlier are kept in /save/wads, and the page's URL
+  // says which to use: ?iwad=NAME&file=NAME,NAME. ?args=... adds
+  // more command-line options, e.g. ?args=-warp%201%201%20-skill%203
+  var query = new URLSearchParams(location.search);
+
+  function setStatus(text, error) {
+    statusEl.textContent = text;
+    statusEl.className = error ? 'error' : '';
+  }
+
+  function showOverlay(text, error) {
+    running = false;
+    hint.classList.add('hidden');
+    if (document.pointerLockElement)
+      document.exitPointerLock();
+    overlay.classList.remove('hidden');
+    document.getElementById('bar').classList.add('hidden');
+    document.getElementById('wads').classList.add('hidden');
+    setStatus(text, error);
+    play.textContent = 'Play again';
+    play.disabled = false;
+    play.onclick = function () { location.reload(); };
+  }
+
+  function log(text) {
+    lastlines.push(text);
+    if (lastlines.length > 8)
+      lastlines.shift();
+  }
+
+  function describeWads() {
+    var iwad = query.get('iwad');
+    var files = (query.get('file') || '').split(',').filter(Boolean);
+    var parts = [iwad || 'Freedoom: Phase 1'].concat(files);
+    using.textContent = parts.join(' + ');
+    forget.classList.toggle('hidden', !iwad && !files.length);
+  }
+
+  function gameArgs() {
+    var args = [];
+    var iwad = query.get('iwad');
+    var files = (query.get('file') || '').split(',').filter(Boolean);
+    if (iwad)
+      args.push('-iwad', WADDIR + '/' + iwad);
+    if (files.length) {
+      args.push('-file');
+      files.forEach(function (f) { args.push(WADDIR + '/' + f); });
+    }
+    (query.get('args') || '').split(/\s+/).filter(Boolean)
+      .forEach(function (a) { args.push(a); });
+    return args;
+  }
+
+  // Keeps /save (saved games, .doomrc, picked WADs) in IndexedDB.
+  var syncing = false, syncagain = false;
+  function syncFiles() {
+    if (syncing) { syncagain = true; return; }
+    syncing = true;
+    Module.FS.syncfs(false, function (err) {
+      syncing = false;
+      if (err)
+        console.warn('Could not save to IndexedDB:', err);
+      if (syncagain) { syncagain = false; syncFiles(); }
+    });
+  }
+
+  function start() {
+    if (running || failed)
+      return;
+    running = true;
+    overlay.classList.add('hidden');
+    canvas.focus();
+    // Called from the click, so the audio context may start.
+    Module.callMain(gameArgs());
+  }
+
+  var Module = window.Module = {
+    canvas: canvas,
+    noInitialRun: true,
+    print: function (text) { console.log(text); log(text); },
+    printErr: function (text) { console.warn(text); log(text); },
+    setStatus: function (text) {
+      var m = text.match(/\((\d+(?:\.\d+)?)\/(\d+)\)/);
+      if (m)
+        fill.style.width = (100 * m[1] / m[2]) + '%';
+      if (text && !running && !failed)
+        setStatus(text.replace(/\s*\(.*\)$/, '…'));
+    },
+    preRun: [function () {
+      var FS = Module.FS;
+      FS.mkdir('/save');
+      FS.mount(FS.filesystems.IDBFS, {}, '/save');
+      Module.addRunDependency('syncfs');
+      FS.syncfs(true, function (err) {
+        if (err)
+          console.warn('Could not read IndexedDB:', err);
+        try { FS.mkdir(WADDIR); } catch (e) {}
+        Module.removeRunDependency('syncfs');
+      });
+    }],
+    onRuntimeInitialized: function () {
+      fill.style.width = '100%';
+      setStatus('Ready.');
+      play.disabled = false;
+      play.onclick = start;
+      document.getElementById('pick').disabled = false;
+    },
+    doomSyncFiles: syncFiles,
+    doomQuit: function () {
+      syncFiles();
+      showOverlay('Thanks for playing.');
+    },
+    doomError: function (message) {
+      failed = true;
+      showOverlay('Error: ' + message, true);
+    },
+    onAbort: function (what) {
+      failed = true;
+      showOverlay('The game crashed: ' + what + '\n\n' + lastlines.join('\n'), true);
+    },
+    doomWantsPointer: 0
+  };
+
+  // Pointer lock needs a click; the game says when it wants the mouse.
+  canvas.addEventListener('click', function () {
+    if (running && Module.doomWantsPointer && document.pointerLockElement !== canvas)
+      canvas.requestPointerLock();
+  });
+  canvas.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+  setInterval(function () {
+    hint.classList.toggle('hidden', !(running && Module.doomWantsPointer
+                                      && document.pointerLockElement !== canvas));
+  }, 250);
+
+  // Keep the browser's own shortcuts (F1 help, F5 reload, Tab, space
+  // scrolling, Backspace...) away from the game's keys.
+  window.addEventListener('keydown', function (e) {
+    if (!running)
+      return;
+    if (e.key === 'Enter' && e.altKey) {
+      if (document.fullscreenElement)
+        document.exitFullscreen();
+      else
+        document.documentElement.requestFullscreen();
+      e.preventDefault();
+      return;
+    }
+    if (/^(F\d+|Tab|Backspace|Arrow\w+|PageUp|PageDown|Home|End| )$/.test(e.key)
+        || e.ctrlKey || e.altKey)
+      e.preventDefault();
+  });
+
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden && running)
+      syncFiles();
+  });
+
+  // A user's own WADs go to /save/wads and stay there; the page is
+  // reloaded with them named in the URL, which starts a fresh game.
+  document.getElementById('pick').onclick = function () { picker.click(); };
+  picker.onchange = function () {
+    var files = Array.prototype.slice.call(picker.files);
+    if (!files.length)
+      return;
+    setStatus('Reading ' + files.length + ' file(s)…');
+    Promise.all(files.map(function (f) {
+      return f.arrayBuffer().then(function (buf) {
+        var data = new Uint8Array(buf);
+        var id = String.fromCharCode.apply(null, data.subarray(0, 4));
+        if (id !== 'IWAD' && id !== 'PWAD')
+          throw new Error(f.name + ' is not a WAD file');
+        var name = f.name.replace(/[^\w.\-]/g, '_');
+        Module.FS.writeFile(WADDIR + '/' + name, data);
+        return { name: name, iwad: id === 'IWAD' };
+      });
+    })).then(function (wads) {
+      var iwads = wads.filter(function (w) { return w.iwad; });
+      var pwads = wads.filter(function (w) { return !w.iwad; });
+      var next = new URLSearchParams(location.search);
+      if (iwads.length)
+        next.set('iwad', iwads[0].name);
+      if (pwads.length)
+        next.set('file', pwads.map(function (w) { return w.name; }).join(','));
+      else if (iwads.length)
+        next.delete('file');
+      Module.FS.syncfs(false, function () {
+        location.search = next.toString();
+      });
+    }).catch(function (err) {
+      setStatus(String(err.message || err), true);
+    });
+  };
+  forget.onclick = function () {
+    var FS = Module.FS;
+    FS.readdir(WADDIR).forEach(function (f) {
+      if (f !== '.' && f !== '..')
+        FS.unlink(WADDIR + '/' + f);
+    });
+    FS.syncfs(false, function () {
+      var next = new URLSearchParams(location.search);
+      next.delete('iwad');
+      next.delete('file');
+      location.search = next.toString();
+    });
+  };
+
+  describeWads();
+})();
+</script>
+{{{ SCRIPT }}}
+</body>
+</html>

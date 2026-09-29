@@ -49,6 +49,10 @@ rcsid[] = "$Id: m_bbox.c,v 1.1 1997/02/03 22:45:10 b1 Exp $";
 #include "i_system.h"
 #include "i_win32.h"
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
+
 
 
 
@@ -142,11 +146,24 @@ void I_Quit (void)
     I_ShutdownMusic();
     M_SaveDefaults ();
     I_ShutdownGraphics();
+#ifdef __EMSCRIPTEN__
+    // exit() would leave the page frozen on the last frame; let the
+    // page say the game is over, and stop the frame loop for good.
+    I_SyncFiles ();
+    EM_ASM ({ if (Module.doomQuit) Module.doomQuit (); });
+    emscripten_cancel_main_loop ();
+    emscripten_force_exit (0);
+#endif
     exit(0);
 }
 
 void I_WaitVBL(int count)
 {
+#ifdef __EMSCRIPTEN__
+    // Waiting would block the page, and with it the audio that
+    // this wait is for.
+    return;
+#endif
 #ifdef SGI
     sginap(1);                                           
 #else
@@ -205,6 +222,18 @@ void I_Error (char *error, ...)
     }
 #endif
 
+#ifdef __EMSCRIPTEN__
+    {
+	char	message[512];
+
+	va_start (argptr,error);
+	vsnprintf (message, sizeof(message), error, argptr);
+	va_end (argptr);
+	EM_ASM ({ if (Module.doomError) Module.doomError (UTF8ToString ($0)); },
+		message);
+    }
+#endif
+
     // Shutdown. Here might be other errors.
     if (demorecording)
 	G_CheckDemoStatus();
@@ -212,5 +241,18 @@ void I_Error (char *error, ...)
     D_QuitNetGame ();
     I_ShutdownGraphics();
     
+#ifdef __EMSCRIPTEN__
+    emscripten_cancel_main_loop ();
+    emscripten_force_exit (1);
+#endif
     exit(-1);
+}
+
+
+void I_SyncFiles (void)
+{
+#ifdef __EMSCRIPTEN__
+    // The shell page mounts IndexedDB under /save (see web/shell.html).
+    EM_ASM ({ if (Module.doomSyncFiles) Module.doomSyncFiles (); });
+#endif
 }
