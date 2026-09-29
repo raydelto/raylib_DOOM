@@ -93,6 +93,10 @@ void I_Error (char *error, ...);
 void I_BundleEnterDataDir (void);
 #endif
 
+// Writes changed saved games and settings through to the browser's
+// IndexedDB. Does nothing outside the browser build.
+void I_SyncFiles (void);
+
 
 #endif
 //-----------------------------------------------------------------------------

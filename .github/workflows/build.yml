@@ -34,3 +34,34 @@ jobs:
         with:
           name: raylibdoom-${{ matrix.os }}
           path: build/raylibdoom
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 6.0.10
+          actions-cache-folder: emsdk-cache
+
+      # Downloads Freedoom 0.13.0 (checked against its SHA-256) and
+      # builds raylib 5.5 for the web.
+      - name: Configure
+        run: emcmake cmake -B build-web
+
+      - name: Build
+        run: cmake --build build-web -j
+
+      - name: Sizes
+        run: ls -l build-web/raylibdoom.* build-web/freedoom-COPYING.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: raylibdoom-web
+          path: |
+            build-web/raylibdoom.html
+            build-web/raylibdoom.js
+            build-web/raylibdoom.wasm
+            build-web/raylibdoom.data
+            build-web/freedoom-COPYING.txt

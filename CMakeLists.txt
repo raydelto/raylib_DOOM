@@ -5,7 +5,18 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_EXTENSIONS ON)
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
-  set(CMAKE_BUILD_TYPE RelWithDebInfo)
+  if(EMSCRIPTEN)
+    # Debug info would make the .wasm several times larger.
+    set(CMAKE_BUILD_TYPE Release)
+  else()
+    set(CMAKE_BUILD_TYPE RelWithDebInfo)
+  endif()
+endif()
+
+# The browser build (emcmake cmake -B build-web) uses raylib's web
+# platform whether or not -DPLATFORM=Web is given.
+if(EMSCRIPTEN)
+  set(PLATFORM Web CACHE STRING "raylib platform" FORCE)
 endif()
 
 # Use an installed raylib if there is one, otherwise build it.
@@ -49,6 +60,9 @@ if(APPLE)
   # i_main.c shows a dialog when raylibDOOM.app finds no IWAD.
   target_link_libraries(raylibdoom PRIVATE "-framework CoreFoundation")
 endif()
+if(EMSCRIPTEN)
+  include(web/web.cmake)
+endif()
 
 # Plain char is unsigned on Linux arm/aarch64, but the code assumes it
 # is signed, as on x86: ticcmd_t's forwardmove and sidemove are char,
@@ -72,6 +86,10 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
 endif()
 
 # Parser regression tests: cmake --build build && ctest --test-dir build
+# They need the host's sanitizers, so the browser build has none.
+if(EMSCRIPTEN)
+  return()
+endif()
 enable_testing()
 add_executable(midi_register_test tests/midi_register_test.c ${DOOM_DIR}/opl3.c)
 target_include_directories(midi_register_test PRIVATE ${DOOM_DIR})

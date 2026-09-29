@@ -78,6 +78,10 @@ static const char rcsid[] = "$Id: d_main.c,v 1.8 1997/02/03 22:45:09 b1 Exp $";
 #include "p_setup.h"
 #include "r_local.h"
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
+
 
 #include "d_main.h"
 
@@ -194,6 +198,36 @@ extern  boolean setsizeneeded;
 extern  int             showMessages;
 void R_ExecuteSetViewSize (void);
 
+// The screen wipe runs a tic at a time. The browser build shows
+// each step from its own frame, since nothing reaches the canvas
+// until control goes back to the browser.
+static int	wipestart;
+static boolean	wipeactive;
+
+//
+// D_WipeTic
+// Advances the wipe by the tics passed since the last step, if any.
+// Returns true once it is done.
+//
+static boolean D_WipeTic (void)
+{
+    int		nowtime;
+    int		tics;
+    boolean	done;
+
+    nowtime = I_GetTime ();
+    tics = nowtime - wipestart;
+    if (!tics)
+	return false;
+    wipestart = nowtime;
+    done = wipe_ScreenWipe(wipe_Melt
+			   , 0, 0, SCREENWIDTH, SCREENHEIGHT, tics);
+    I_UpdateNoBlit ();
+    M_Drawer ();                            // menu is drawn even on top of wipes
+    I_FinishUpdate ();                      // page flip or blit buffer
+    return done;
+}
+
 void D_Display (void)
 {
     static  boolean		viewactivestate = false;
@@ -202,11 +236,7 @@ void D_Display (void)
     static  boolean		fullscreen = false;
     static  gamestate_t		oldgamestate = -1;
     static  int			borderdrawcount;
-    int				nowtime;
-    int				tics;
-    int				wipestart;
     int				y;
-    boolean			done;
     boolean			wipe;
     boolean			redrawsbar;
 
@@ -332,21 +362,14 @@ void D_Display (void)
 
     wipestart = I_GetTime () - 1;
 
-    do
-    {
-	do
-	{
-	    nowtime = I_GetTime ();
-	    tics = nowtime - wipestart;
-	} while (!tics);
-	wipestart = nowtime;
-	done = wipe_ScreenWipe(wipe_Melt
-			       , 0, 0, SCREENWIDTH, SCREENHEIGHT, tics);
-	I_UpdateNoBlit ();
-	M_Drawer ();                            // menu is drawn even on top of wipes
-	I_FinishUpdate ();                      // page flip or blit buffer
+#ifdef __EMSCRIPTEN__
+    // D_RunFrame steps it from the next frames on.
+    wipeactive = true;
+#else
+    while (!D_WipeTic ())
 	I_UpdateSound ();                       // keep music playing through it
-    } while (!done);
+    I_UpdateSound ();
+#endif
 }
 
 
@@ -355,6 +378,89 @@ void D_Display (void)
 //  D_DoomLoop
 //
 extern  boolean         demorecording;
+
+//
+// D_RunFrame
+// One pass of the game loop: runs the tics that are due and draws.
+//
+static void D_RunFrame (void)
+{
+#ifdef __EMSCRIPTEN__
+    static boolean	wasinmenu;
+    int			oldgametic;
+
+    // The browser gets control back between frames, so a wipe runs
+    // one step per frame instead of looping until it is done.
+    // Input is still read, and queued for after the wipe: each step
+    // polls raylib, which forgets keys that were not read by then.
+    if (wipeactive)
+    {
+	I_StartTic ();
+	if (D_WipeTic ())
+	    wipeactive = false;
+	I_UpdateSound ();			// keep music playing through it
+	return;
+    }
+
+    oldgametic = gametic;
+#endif
+
+    // frame syncronous IO operations
+    I_StartFrame ();                
+	
+    // process one or more tics
+    if (singletics)
+    {
+	I_StartTic ();
+	D_ProcessEvents ();
+	G_BuildTiccmd (&netcmds[consoleplayer][maketic%BACKUPTICS]);
+	if (advancedemo)
+	    D_DoAdvanceDemo ();
+	M_Ticker ();
+	G_Ticker ();
+	gametic++;
+	maketic++;
+    }
+    else
+    {
+	TryRunTics (); // will run at least one tic
+    }
+
+#ifdef __EMSCRIPTEN__
+    // Tab closes lose whatever was changed in the menus, as there is
+    // no quit, so save the settings each time the menu goes away.
+    if (wasinmenu && !menuactive)
+    {
+	M_SaveDefaults ();
+	I_SyncFiles ();
+    }
+    wasinmenu = menuactive;
+
+    // Frames come faster than tics (60 against 35 a second), and
+    // TryRunTics does not wait for the next tic here; there is
+    // nothing new to show until one has run.
+    if (gametic == oldgametic)
+    {
+	I_UpdateSound ();
+	return;
+    }
+#endif
+		
+    S_UpdateSounds (players[consoleplayer].mo);// move positional sounds
+
+    // Update display, next frame, with current state.
+    D_Display ();
+
+#ifndef SNDSERV
+    // Sound mixing for the buffer is snychronous.
+    I_UpdateSound();
+#endif	
+    // Synchronous sound output is explicitly called.
+#ifndef SNDINTR
+    // Update sound output.
+    I_SubmitSound();
+#endif
+}
 
 void D_DoomLoop (void)
 {
@@ -371,44 +477,14 @@ void D_DoomLoop (void)
 	
     I_InitGraphics ();
 
+#ifdef __EMSCRIPTEN__
+    // The browser calls D_RunFrame once per display refresh
+    // (requestAnimationFrame). This does not return.
+    emscripten_set_main_loop (D_RunFrame, 0, 1);
+#else
     while (1)
-    {
-	// frame syncronous IO operations
-	I_StartFrame ();                
-	
-	// process one or more tics
-	if (singletics)
-	{
-	    I_StartTic ();
-	    D_ProcessEvents ();
-	    G_BuildTiccmd (&netcmds[consoleplayer][maketic%BACKUPTICS]);
-	    if (advancedemo)
-		D_DoAdvanceDemo ();
-	    M_Ticker ();
-	    G_Ticker ();
-	    gametic++;
-	    maketic++;
-	}
-	else
-	{
-	    TryRunTics (); // will run at least one tic
-	}
-		
-	S_UpdateSounds (players[consoleplayer].mo);// move positional sounds
-
-	// Update display, next frame, with current state.
-	D_Display ();
-
-#ifndef SNDSERV
-	// Sound mixing for the buffer is snychronous.
-	I_UpdateSound();
-#endif	
-	// Synchronous sound output is explicitly called.
-#ifndef SNDINTR
-	// Update sound output.
-	I_SubmitSound();
+	D_RunFrame ();
 #endif
-    }
 }
 
 

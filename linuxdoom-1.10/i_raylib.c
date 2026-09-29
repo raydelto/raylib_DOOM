@@ -33,6 +33,10 @@
 #include "i_xr.h"
 #endif
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
+
 
 #define WINDOWTITLE	"DOOM"
 
@@ -220,6 +224,11 @@ static int		quitrequested;
 
 int RL_QuitRequested (void)
 {
+#ifdef __EMSCRIPTEN__
+    // A page has no close request, and raylib's WindowShouldClose
+    // sleeps there, which only works in an ASYNCIFY build.
+    return 0;
+#endif
     // WindowShouldClose is true when there is no window, and
     // netgames poll input while arbitrating, before one opens.
 #ifdef __APPLE__
@@ -249,6 +258,7 @@ static unsigned char	keystate[512];
 static unsigned char	swallowed[512];
 
 static int		mousegrabbed;
+static int		mouselocked;	// grabbed, and the pointer really is
 static int		mousebuttons;
 static Vector2		lastmouse;
 
@@ -406,8 +416,24 @@ void RL_PumpEvents (void)
 	buttons |= 4;
 
     pos = GetMousePosition ();
+
+#ifdef __EMSCRIPTEN__
+    // The browser lets go of the pointer on Esc, and locks it again
+    // only on a click in the page; until then the mouse is not ours.
+    if (mousegrabbed && IsCursorHidden ())
+    {
+	if (!mouselocked)
+	    lastmouse = pos;
+	mouselocked = 1;
+    }
+    else
+	mouselocked = 0;
+#else
+    mouselocked = mousegrabbed;
+#endif
+
     dx = dy = 0;
-    if (mousegrabbed)
+    if (mouselocked)
     {
 	dx = (int)(pos.x - lastmouse.x);
 	dy = (int)(pos.y - lastmouse.y);
@@ -416,7 +442,7 @@ void RL_PumpEvents (void)
     }
     lastmouse = pos;
 
-    if (!mousegrabbed)
+    if (!mouselocked)
 	buttons = 0;
 
     if (dx || dy || buttons != mousebuttons)
@@ -448,6 +474,11 @@ void RL_SetMouseGrab (int grab)
 	return;
 
     mousegrabbed = grab;
+#ifdef __EMSCRIPTEN__
+    // The page asks for pointer lock on the next click when the
+    // game wants it (raylib's own request needs a user gesture).
+    EM_ASM ({ Module.doomWantsPointer = $0; }, grab);
+#endif
     if (wslmouse)
 	WSL_Grab (grab);
     else if (grab)
@@ -485,7 +516,7 @@ void RL_SetMouseGrab (int grab)
 // A native Windows build has none of this to work around.
 //
 
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
 
 typedef struct GLFWwindow GLFWwindow;
 typedef struct GLFWcursor GLFWcursor;
@@ -919,6 +950,11 @@ static void WM_SettleWindowed (void) {}
 
 static void ToggleFullscreenWindow (void)
 {
+#ifdef __EMSCRIPTEN__
+    // Browsers allow fullscreen only from inside an input event,
+    // which the frame loop never is; the page does Alt+Enter itself.
+    return;
+#endif
     if (!WM_ToggleFullscreen ())
 	ToggleBorderlessWindowed ();
 }
