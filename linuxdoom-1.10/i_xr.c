@@ -37,6 +37,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include <X11/Xlib.h>
 #include <GL/glx.h>
@@ -95,6 +96,8 @@ static uint32_t		imageindex;
 static XrSessionState	state = XR_SESSION_STATE_UNKNOWN;
 static int		running;	// between xrBeginSession and xrEndSession
 static int		quit;
+static const char*	lost;		// why the runtime went away
+static int		novsync;	// the window's vsync is off
 
 static float		screendistance;
 static float		screenwidth;
@@ -139,17 +142,34 @@ static const char* StateName (XrSessionState s)
 
 
 // The runtime went away (monado-service quit, headset unplugged).
+// Nothing more is sent to it; XR_Update drops OpenXR and the game
+// goes on in the window.
 static int Lost (XrResult r)
 {
     if (r == XR_ERROR_SESSION_LOST || r == XR_ERROR_INSTANCE_LOST)
     {
-	if (!quit)
-	    printf ("XR: lost the runtime: %s\n", ResultName (r));
-	quit = 1;
+	if (!lost)
+	    lost = ResultName (r);
 	running = 0;
 	return 1;
     }
     return 0;
+}
+
+
+//
+// SetVsync
+// While the session runs, xrWaitFrame paces the frames; waiting
+// for the desktop window's vsync as well would halve the frame
+// rate. Otherwise the window's vsync keeps the game from spinning.
+//
+static void SetVsync (int on)
+{
+    if (novsync == !on)
+	return;
+    novsync = !on;
+    if (glfwSwapInterval)
+	glfwSwapInterval (on);
 }
 
 
@@ -168,6 +188,32 @@ static XrPath Path (const char* s)
 
     xrStringToPath (instance, s, &path);
     return path;
+}
+
+
+//
+// XR_PrepareGL
+// The runtime's compositor renders on the GPU the headset hangs
+// off, the NVIDIA one on a laptop that has it, while the window
+// opens on the integrated GPU by default. OpenGL can not share the
+// swapchain images across the two, and Mesa crashes in
+// xrCreateSwapchain trying. So with the NVIDIA driver loaded, ask
+// for PRIME render offload before the window opens.
+// DOOM_XR_PRIME=0 turns this off, and a __GLX_VENDOR_LIBRARY_NAME
+// the user set is left alone.
+//
+void XR_PrepareGL (void)
+{
+    const char*	env = getenv ("DOOM_XR_PRIME");
+
+    if ((env && *env && atoi (env) == 0)
+	|| getenv ("__GLX_VENDOR_LIBRARY_NAME")
+	|| access ("/proc/driver/nvidia/version", F_OK) != 0)
+	return;
+
+    setenv ("__NV_PRIME_RENDER_OFFLOAD", "1", 1);
+    setenv ("__GLX_VENDOR_LIBRARY_NAME", "nvidia", 1);
+    printf ("XR: rendering on the NVIDIA GPU (DOOM_XR_PRIME=0 to not)\n");
 }
 
 
@@ -687,11 +733,6 @@ int XR_Init (float distance, float width)
 	return 0;
     }
 
-    // The headset paces the frames (xrWaitFrame); waiting for the
-    // desktop window's vsync as well would halve the frame rate.
-    if (glfwSwapInterval)
-	glfwSwapInterval (0);
-
     printf ("XR: session created, screen %.1fm wide at %.1fm\n",
 	    screenwidth, screendistance);
     return 1;
@@ -731,6 +772,9 @@ void XR_Shutdown (void)
     instance = XR_NULL_HANDLE;
     running = 0;
     buttons = 0;
+    state = XR_SESSION_STATE_UNKNOWN;
+    lost = NULL;
+    SetVsync (1);
 }
 
 
@@ -774,6 +818,7 @@ static void SessionStateChanged (XrSessionState newstate)
 	if (Check (xrBeginSession (session, &begin), "xrBeginSession"))
 	{
 	    running = 1;
+	    SetVsync (0);
 	    printf ("XR: session running\n");
 	}
 	break;
@@ -781,11 +826,19 @@ static void SessionStateChanged (XrSessionState newstate)
       case XR_SESSION_STATE_STOPPING:
 	Check (xrEndSession (session), "xrEndSession");
 	running = 0;
+	SetVsync (1);
 	break;
 
+      // The user quit from the runtime.
       case XR_SESSION_STATE_EXITING:
-      case XR_SESSION_STATE_LOSS_PENDING:
 	quit = 1;
+	break;
+
+      // The headset or the runtime is going away.
+      case XR_SESSION_STATE_LOSS_PENDING:
+	if (!lost)
+	    lost = StateName (state);
+	running = 0;
 	break;
 
       default:
@@ -799,7 +852,7 @@ static void PollEvents (void)
     XrEventDataBuffer	ev;
     XrResult		r;
 
-    for (;;)
+    while (!lost)
     {
 	ev.type = XR_TYPE_EVENT_DATA_BUFFER;
 	ev.next = NULL;
@@ -817,8 +870,9 @@ static void PollEvents (void)
 	    break;
 
 	  case XR_TYPE_EVENT_DATA_INSTANCE_LOSS_PENDING:
-	    printf ("XR: runtime going away\n");
-	    quit = 1;
+	    if (!lost)
+		lost = "XR_TYPE_EVENT_DATA_INSTANCE_LOSS_PENDING";
+	    running = 0;
 	    break;
 
 	  case XR_TYPE_EVENT_DATA_INTERACTION_PROFILE_CHANGED:
@@ -912,6 +966,13 @@ int XR_Update (void)
 	return 1;
 
     PollEvents ();
+    if (lost && !quit)
+    {
+	printf ("XR: lost the OpenXR runtime (%s),"
+		" continuing in the window\n", lost);
+	XR_Shutdown ();
+	return 1;
+    }
     ReadControllers ();
     return !quit;
 }
@@ -982,7 +1043,7 @@ void XR_Present (xr_draw_t draw)
     const XrCompositionLayerBaseHeader*	layers[1];
     XrResult			r;
 
-    if (!running)
+    if (!running || lost)
 	return;
 
     r = xrWaitFrame (session, &waitinfo, &frame);

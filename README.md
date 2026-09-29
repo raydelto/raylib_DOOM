@@ -232,7 +232,8 @@ a large virtual screen floating in front of you in an OpenXR headset,
 with head tracking. It is still the flat 320x200 game, not a
 stereoscopic 3D renderer. `raylibdoom` and the other platforms are
 built as before. Besides raylib's dependencies it needs the OpenXR
-loader and headers (`sudo apt install libopenxr-dev`); without them
+loader and headers (`sudo apt install libopenxr-dev`), found through
+their CMake config or, failing that, pkg-config (`openxr.pc`); without them
 CMake downloads and builds the loader from the OpenXR SDK
 ([OpenXR-SDK](https://github.com/KhronosGroup/OpenXR-SDK) 1.0.34 by
 the Khronos Group, mainly under the Apache License 2.0, with bundled
@@ -247,8 +248,9 @@ ctest --test-dir build-xr
 ```
 
 The `xr` test runs `i_xr.c` against a fake runtime under
-AddressSanitizer: overlong extension and swapchain image lists, and
-swapchain image waits and releases that fail.
+AddressSanitizer: overlong extension and swapchain image lists,
+swapchain image waits and releases that fail, a runtime that is lost
+or quits, and the window's vsync.
 
 To try it without a headset, run the [Monado](https://monado.dev/)
 runtime with its simulated headset (`sudo apt install monado-service
@@ -272,8 +274,18 @@ terminal or pipe (`epoll_ctl(stdin) failed`); start it from a terminal,
 or as `sleep infinity | monado-service`. On a laptop with two GPUs the
 game's OpenGL and Monado's Vulkan have to be on the same one, or the
 game crashes in the OpenGL driver while creating the swapchain. Monado
-usually picks the discrete GPU, so on NVIDIA run the game with
-`__NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia`.
+usually picks the discrete GPU, so when the NVIDIA driver is loaded
+`raylib_doom_xr` sets `__NV_PRIME_RENDER_OFFLOAD=1` and
+`__GLX_VENDOR_LIBRARY_NAME=nvidia` before it opens its window.
+`DOOM_XR_PRIME=0` turns that off, and a `__GLX_VENDOR_LIBRARY_NAME`
+you set yourself is left alone.
+
+Without a runtime or headset, or if the session can not be created, the
+game says why on the `XR:` lines and plays in the window. If the runtime
+goes away during the game (`monado-service` stopped, headset unplugged),
+it says so once and goes on in the window; quitting from the runtime
+still quits the game. While the session runs, the headset paces the
+frames and the window's vsync is off; it is back on otherwise.
 
 The desktop window keeps a copy of the picture, and the keyboard and
 mouse work as usual while it has focus. Controllers (the ones OpenXR
@@ -296,7 +308,7 @@ quit, press menu, pick Quit Game with fire, then press fire again.
 
 | Option          | Effect                                               |
 | --------------- | ---------------------------------------------------- |
-| `-xrflat`       | Play in the window if there is no runtime or headset, instead of exiting with an error |
+| `-xrflat`       | Accepted for older scripts; playing in the window without a runtime or headset is now the default |
 | `-noxr`         | Play in the window without trying OpenXR             |
 | `-xrdist M`     | Screen distance in meters (default 2.5)              |
 | `-xrwidth M`    | Screen width in meters (default 3.2)                 |
