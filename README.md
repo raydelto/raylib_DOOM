@@ -229,6 +229,10 @@ Reality) are mapped to your key bindings:
 | Right B, or right menu          | Automap           | Backspace     |
 | Left menu (Index: left B)       | Menu (Esc)        | Esc           |
 
+In a yes/no prompt, such as "are you sure you want to quit?", fire or
+use answers yes, run or automap answers no, and menu cancels. So to
+quit, press menu, pick Quit Game with fire, then press fire again.
+
 | Option          | Effect                                               |
 | --------------- | ---------------------------------------------------- |
 | `-xrflat`       | Play in the window if there is no runtime or headset, instead of exiting with an error |

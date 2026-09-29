@@ -68,6 +68,10 @@ extern int	key_fire;
 extern int	key_use;
 extern int	key_speed;
 
+// m_menu.c: a message is up, and it waits for y or n.
+extern int	messageToPrint;
+extern boolean	messageNeedsInput;
+
 static unsigned	xrheld;
 
 // Key sent for each held button, so its release matches even if
@@ -76,6 +80,21 @@ static int	xrkeys[XR_NUMBUTTONS];
 
 static int XRKey (unsigned button)
 {
+    // Yes/no prompts (quit, end game, overwrite a save, nightmare)
+    // ignore Enter and Backspace, so answer them directly.
+    if (messageToPrint && messageNeedsInput)
+    {
+	switch (button)
+	{
+	  case XR_FIRE:
+	  case XR_USE:		return 'y';
+	  case XR_RUN:
+	  case XR_MAP:		return 'n';
+	  case XR_MENU:		return KEY_ESCAPE;
+	}
+	return 0;
+    }
+
     if (menuactive)
     {
 	switch (button)
