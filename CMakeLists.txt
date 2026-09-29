@@ -4,6 +4,10 @@ project(raylib_doom C)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_EXTENSIONS ON)
 
+# A second executable, raylib_doom_xr, that also shows the game on an
+# OpenXR headset. Linux/X11 only; needs the OpenXR loader and headers.
+option(RAYLIB_DOOM_XR "Also build raylib_doom_xr, for OpenXR headsets" OFF)
+
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE RelWithDebInfo)
 endif()
@@ -69,6 +73,43 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     -fwrapv -fno-strict-aliasing -Wall -Wno-unused-variable
     -Wno-unused-but-set-variable -Wno-unused-const-variable)
   target_compile_options(raylibdoom PRIVATE ${DOOM_SIGNED_CHAR})
+endif()
+
+if(RAYLIB_DOOM_XR)
+  if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    message(FATAL_ERROR "RAYLIB_DOOM_XR: only Linux (X11/GLX) is supported")
+  endif()
+
+  # Distribution packages (libopenxr-dev) ship a CMake config;
+  # fall back to pkg-config for loaders built without one.
+  find_package(OpenXR CONFIG QUIET)
+  if(TARGET OpenXR::openxr_loader)
+    set(DOOM_OPENXR OpenXR::openxr_loader)
+  else()
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+      pkg_check_modules(OPENXR IMPORTED_TARGET openxr)
+    endif()
+    if(NOT OPENXR_FOUND)
+      message(FATAL_ERROR "RAYLIB_DOOM_XR: OpenXR loader not found "
+        "(on Debian/Ubuntu: sudo apt install libopenxr-dev)")
+    endif()
+    set(DOOM_OPENXR PkgConfig::OPENXR)
+  endif()
+  find_package(OpenGL REQUIRED COMPONENTS OpenGL GLX)
+  find_package(X11 REQUIRED)
+
+  add_executable(raylib_doom_xr ${DOOM_SOURCES} ${DOOM_DIR}/i_xr.c)
+  target_compile_definitions(raylib_doom_xr PRIVATE
+    NORMALUNIX LINUX RAYLIB_DOOM_XR)
+  target_link_libraries(raylib_doom_xr PRIVATE
+    raylib m ${DOOM_OPENXR} OpenGL::GLX X11::X11)
+  if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(raylib_doom_xr PRIVATE
+      -fwrapv -fno-strict-aliasing -Wall -Wno-unused-variable
+      -Wno-unused-but-set-variable -Wno-unused-const-variable
+      ${DOOM_SIGNED_CHAR})
+  endif()
 endif()
 
 # Parser regression tests: cmake --build build && ctest --test-dir build

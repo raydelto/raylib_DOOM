@@ -111,6 +111,70 @@ new window, so the game can open fullscreen then. While you play the
 mouse is captured and the pointer hidden; in menus, when paused, and
 when the window loses focus, it is released.
 
+### OpenXR headsets (Linux)
+
+An opt-in second executable, `raylib_doom_xr`, also shows the game in
+an OpenXR headset: the 320x200 picture hangs in front of you as a 4 by
+3 metre cinema screen, 3 metres away at eye height, fixed in space
+where you were looking when the game started. It is not a 3D view of
+the level; the software renderer still draws the flat picture. The
+default build is unchanged and does not need OpenXR.
+
+It needs the OpenXR loader and headers and an OpenXR runtime with
+`XR_KHR_opengl_enable`, such as [Monado](https://monado.freedesktop.org/)
+(on Ubuntu 24.04: `sudo apt install libopenxr-dev libopenxr-loader1
+libopenxr1-monado monado-service`). Only Linux on X11 is supported;
+under Wayland the game runs through XWayland as usual.
+
+```sh
+cmake -B build-xr -DRAYLIB_DOOM_XR=ON
+cmake --build build-xr -j
+```
+
+With Monado, start the service first (it keeps running until you press
+Enter in its terminal), then the game from another terminal:
+
+```sh
+monado-service
+XR_RUNTIME_JSON=/usr/share/openxr/1/openxr_monado.json \
+    ./build-xr/raylib_doom_xr -iwad ~/wads/freedoom1.wad
+```
+
+`XR_RUNTIME_JSON` is only needed when the active runtime
+(`~/.config/openxr/1/active_runtime.json`, then
+`/etc/xdg/openxr/1/active_runtime.json`) is not the one you want or is
+broken. Without a headset Monado opens a window showing a simulated
+one, which is enough to see the screen and check the build.
+
+The desktop window stays open as a mirror, and the keyboard and mouse
+work as usual while it has focus. The controllers are mapped for the
+KHR simple controller, Oculus Touch, Valve Index, HTC Vive and Windows
+Mixed Reality controllers:
+
+| Action | Touch / WMR | Index | Vive | Simple controller |
+| ------ | ----------- | ----- | ---- | ----------------- |
+| Move and strafe | left stick | left stick | left trackpad | - |
+| Turn | right stick | right stick | right trackpad | - |
+| Fire (Enter in menus) | right trigger | right trigger | right trigger | right select |
+| Use (Yes in prompts) | A or X (Touch), left trigger (WMR) | A | left trigger | left select |
+| Menu (Escape) | left menu | left B | menu | menu |
+
+The sticks press your bound move, strafe and turn keys, and the arrow
+keys too so they also work the menus.
+
+If there is no OpenXR runtime, the service is not running or there is
+no headset, the game prints why (lines starting with `XR:`) and plays in
+the window only. If the runtime goes away while playing, for example
+when `monado-service` stops, it carries on in the window the same way.
+
+On laptops with an NVIDIA GPU, the window would normally open on the
+integrated GPU while the runtime renders on the NVIDIA one, and OpenGL
+cannot share the headset's images between them. So when the NVIDIA
+driver is loaded, `raylib_doom_xr` asks for PRIME render offload
+(`__NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia`) before
+opening its window. Set `DOOM_XR_PRIME=0`, or your own
+`__GLX_VENDOR_LIBRARY_NAME`, to choose differently.
+
 ## Running
 
 Put an IWAD (`doom1.wad`, `doom.wad`, `doom2.wad`, `plutonia.wad`,
@@ -196,6 +260,9 @@ that off, or `DOOM_WSL_MOUSE=1` to force it.
   1.8 by Nuke.YKT, unmodified, under the LGPL 2.1 or later
   (`opl3-LICENSE.txt`).
 - `doomkeys.h`: the key codes, split out of `doomdef.h`.
+- `i_xr.c` / `i_xr.h`: new, only in `raylib_doom_xr`. The OpenXR
+  instance, session, quad layer and controller actions, called from
+  `i_raylib.c`.
 - 64-bit fixes: pointer arrays sized with `sizeof` instead of `4`,
   pointer/integer casts through `intptr_t`, the on-disk texture struct
   no longer holds a pointer, the config file's string settings, the

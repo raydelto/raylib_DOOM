@@ -1,3 +1,4 @@
 build/
+build-*/
 dist/
 linuxdoom-1.10/linux/

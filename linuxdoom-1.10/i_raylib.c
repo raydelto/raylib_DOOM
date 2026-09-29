@@ -30,17 +30,31 @@
 
 #include "i_raylib.h"
 
+#ifdef RAYLIB_DOOM_XR
+#include "rlgl.h"
+#include "i_xr.h"
+#endif
+
 
 #define WINDOWTITLE	"DOOM"
 
 // Filled in at the bottom of the file, after the DOOM key macros
 // are included (they would otherwise shadow raylib's KEY_* enums).
 static int TranslateSpecialKey (int index);
+#ifdef RAYLIB_DOOM_XR
+static int TranslateXRButton (int bit, int which);
+#endif
 
 static void WSL_Init (void);
 static void WSL_Shutdown (void);
 static void ToggleFullscreenWindow (void);
 static void WM_SettleWindowed (void);
+static int XRV_Init (void);
+static void XRV_Start (void);
+static void XRV_Present (void);
+static void XRV_Shutdown (void);
+static void XRV_PumpEvents (void);
+static int XRV_ExitRequested (void);
 
 // raylib's INFO chatter would drown DOOM's startup log.
 static void QuietRaylib (void)
@@ -72,7 +86,10 @@ void RL_InitVideo (int width, int height, int scale, int fullscreen)
     screenheight = height;
 
     QuietRaylib ();
-    SetConfigFlags (FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT);
+    // With a headset, xrWaitFrame paces the game; waiting for the
+    // monitor as well would cost frames.
+    SetConfigFlags (FLAG_WINDOW_RESIZABLE
+		    | (XRV_Init () ? 0 : FLAG_VSYNC_HINT));
 
     // DOOM's 320x200 was shown on 4:3 monitors with tall pixels.
     InitWindow (width*scale, (width*3/4)*scale, WINDOWTITLE);
@@ -89,6 +106,7 @@ void RL_InitVideo (int width, int height, int scale, int fullscreen)
     UnloadImage (blank);
     SetTextureFilter (screentex, TEXTURE_FILTER_POINT);
 
+    XRV_Start ();
     WSL_Init ();
 }
 
@@ -99,6 +117,7 @@ void RL_ShutdownVideo (void)
 	return;
 
     WSL_Shutdown ();
+    XRV_Shutdown ();
     if (prescale)
 	UnloadRenderTexture (prescaled);
     UnloadTexture (screentex);
@@ -118,6 +137,7 @@ void RL_Present (const unsigned char* rgba)
     Rectangle	dst;
 
     UpdateTexture (screentex, rgba);
+    XRV_Present ();
 
     // Letterbox to 4:3.
     winw = (float)GetScreenWidth ();
@@ -183,6 +203,8 @@ int RL_QuitRequested (void)
     if (quitrequested)
 	return 1;
 #endif
+    if (XRV_ExitRequested ())
+	return 1;
     return IsWindowReady () && WindowShouldClose ();
 }
 
@@ -382,6 +404,8 @@ void RL_PumpEvents (void)
 	// Same scaling as the original X11 code.
 	PostEvent (rl_mouse, buttons, dx << 2, -dy << 2);
     }
+
+    XRV_PumpEvents ();
 }
 
 
@@ -883,6 +907,176 @@ static void ToggleFullscreenWindow (void)
 
 
 //
+// HEADSET
+//
+// In the raylib_doom_xr build (see i_xr.c) the frame also goes to
+// an OpenXR headset, and the controllers press DOOM keys. The
+// window stays open as a mirror and for the keyboard and mouse.
+// Without a runtime or a headset the game says why and carries
+// on in the window alone.
+//
+
+#ifdef RAYLIB_DOOM_XR
+
+// A framebuffer for each swapchain image, found by texture.
+static unsigned int	xrtextures[8];
+static unsigned int	xrfbos[8];
+static int		xrnumfbos;
+static int		xrbuttons;
+
+
+static int XRV_Init (void)
+{
+    if (XR_Init ())
+	return 1;
+
+    fprintf (stderr, "XR: no headset, playing in the window only\n");
+    return 0;
+}
+
+
+static void XRV_Start (void)
+{
+    XR_StartSession ();
+}
+
+
+static void XRV_FreeFramebuffers (void)
+{
+    int		i;
+
+    for (i = 0; i < xrnumfbos; i++)
+	rlUnloadFramebuffer (xrfbos[i]);
+    xrnumfbos = 0;
+}
+
+
+static unsigned int XRV_Framebuffer (unsigned int texture)
+{
+    unsigned int	fbo;
+    int			i;
+
+    for (i = 0; i < xrnumfbos; i++)
+	if (xrtextures[i] == texture)
+	    return xrfbos[i];
+
+    if (xrnumfbos == (int)(sizeof(xrfbos)/sizeof(xrfbos[0])))
+	XRV_FreeFramebuffers ();
+
+#if RAYLIB_VERSION_MAJOR > 5 || (RAYLIB_VERSION_MAJOR == 5 && RAYLIB_VERSION_MINOR >= 5)
+    fbo = rlLoadFramebuffer ();
+#else
+    fbo = rlLoadFramebuffer (0, 0);
+#endif
+    rlFramebufferAttach (fbo, texture, RL_ATTACHMENT_COLOR_CHANNEL0,
+			 RL_ATTACHMENT_TEXTURE2D, 0);
+    if (!rlFramebufferComplete (fbo))
+	fprintf (stderr, "XR: swapchain framebuffer incomplete\n");
+
+    xrtextures[xrnumfbos] = texture;
+    xrfbos[xrnumfbos] = fbo;
+    return xrfbos[xrnumfbos++];
+}
+
+
+static void XRV_Present (void)
+{
+    RenderTexture2D	target;
+    unsigned int	texture;
+    int			w;
+    int			h;
+
+    if (!XR_Active ())
+    {
+	XRV_FreeFramebuffers ();
+	return;
+    }
+
+    if (XR_BeginFrame (&texture, &w, &h))
+    {
+	// raylib only needs the ids and the size to draw into it.
+	memset (&target, 0, sizeof(target));
+	target.id = XRV_Framebuffer (texture);
+	target.texture.id = texture;
+	target.texture.width = w;
+	target.texture.height = h;
+	target.texture.mipmaps = 1;
+	target.texture.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
+
+	BeginTextureMode (target);
+	ClearBackground (BLACK);
+	DrawTexturePro (screentex,
+			(Rectangle) { 0, 0, (float)screenwidth, (float)screenheight },
+			(Rectangle) { 0, 0, (float)w, (float)h },
+			(Vector2) { 0, 0 }, 0.0f, WHITE);
+	EndTextureMode ();
+    }
+    XR_EndFrame ();
+}
+
+
+static void XRV_Shutdown (void)
+{
+    XRV_FreeFramebuffers ();
+    XR_Shutdown ();
+}
+
+
+static void XRV_PumpEvents (void)
+{
+    int		held;
+    int		changed;
+    int		bit;
+    int		i;
+    int		key;
+    int		prev;
+
+    XR_PumpEvents ();
+
+    held = XR_Buttons ();
+    changed = held ^ xrbuttons;
+    xrbuttons = held;
+
+    for (i = 0; i < XRB_NUMBUTTONS; i++)
+    {
+	bit = 1 << i;
+	if (!(changed & bit))
+	    continue;
+
+	// A button may press a second key for the menus
+	// (fire is also Enter); never the same key twice.
+	prev = 0;
+	for (key = 0; key < 2; key++)
+	{
+	    int doomkey = TranslateXRButton (bit, key);
+
+	    if (!doomkey || doomkey == prev)
+		continue;
+	    PostEvent ((held & bit) ? rl_keydown : rl_keyup, doomkey, 0, 0);
+	    prev = doomkey;
+	}
+    }
+}
+
+
+static int XRV_ExitRequested (void)
+{
+    return XR_ExitRequested ();
+}
+
+#else
+
+static int XRV_Init (void) { return 0; }
+static void XRV_Start (void) {}
+static void XRV_Present (void) {}
+static void XRV_Shutdown (void) {}
+static void XRV_PumpEvents (void) {}
+static int XRV_ExitRequested (void) { return 0; }
+
+#endif
+
+
+//
 // AUDIO
 //
 // Each stream (sound effects, music) has its own single-producer,
@@ -1047,3 +1241,43 @@ static int TranslateSpecialKey (int index)
 
     return doomkeys[index];
 }
+
+
+#ifdef RAYLIB_DOOM_XR
+
+// The player's key bindings, from g_game.c.
+extern int	key_right;
+extern int	key_left;
+extern int	key_up;
+extern int	key_down;
+extern int	key_strafeleft;
+extern int	key_straferight;
+extern int	key_fire;
+extern int	key_use;
+
+//
+// TranslateXRButton
+// The first (which 0) and second (which 1) DOOM key a controller
+// button presses. The extra keys work the menus, which read the
+// arrows, Enter and Escape whatever the bindings are. Use sends
+// 'y' first so it answers "are you sure?" prompts, which take
+// only y, n, space and Escape; no game key is bound to 'y'.
+//
+static int TranslateXRButton (int bit, int which)
+{
+    switch (bit)
+    {
+      case XRB_FORWARD:	    return which ? KEY_UPARROW : key_up;
+      case XRB_BACK:	    return which ? KEY_DOWNARROW : key_down;
+      case XRB_STRAFELEFT:  return which ? 0 : key_strafeleft;
+      case XRB_STRAFERIGHT: return which ? 0 : key_straferight;
+      case XRB_TURNLEFT:    return which ? KEY_LEFTARROW : key_left;
+      case XRB_TURNRIGHT:   return which ? KEY_RIGHTARROW : key_right;
+      case XRB_FIRE:	    return which ? KEY_ENTER : key_fire;
+      case XRB_USE:	    return which ? key_use : 'y';
+      case XRB_MENU:	    return which ? 0 : KEY_ESCAPE;
+    }
+    return 0;
+}
+
+#endif
