@@ -40,7 +40,10 @@ enum
     XR_RUN		= 1 << 8,
     XR_MENU		= 1 << 9,
     XR_MAP		= 1 << 10,
-    XR_NUMBUTTONS	= 11
+    XR_STRAFE		= 1 << 11,	// held: turning strafes instead
+    XR_NEXTWEAPON	= 1 << 12,
+    XR_PREVWEAPON	= 1 << 13,
+    XR_NUMBUTTONS	= 14
 };
 
 // Before the window opens: puts OpenGL on the GPU the headset

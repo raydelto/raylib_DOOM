@@ -39,7 +39,7 @@ rcsid[] = "$Id: i_x.c,v 1.6 1997/02/03 22:45:10 b1 Exp $";
 #include "doomdef.h"
 
 #include "i_raylib.h"
-#if defined(DOOM_XR) || defined(__ANDROID__)
+#if defined(DOOM_XR) || defined(__ANDROID__) || defined(PLATFORM_PLAYSTATION2)
 #include "i_xr.h"
 #endif
 
@@ -52,10 +52,11 @@ rcsid[] = "$Id: i_x.c,v 1.6 1997/02/03 22:45:10 b1 Exp $";
 extern int	usemouse;
 
 
-#if defined(DOOM_XR) || defined(__ANDROID__)
+#if defined(DOOM_XR) || defined(__ANDROID__) || defined(PLATFORM_PLAYSTATION2)
 //
-// Headset controllers, and on Android the gamepad and the touch
-// controls, which report the same buttons (RL_PadButtons).
+// Headset controllers, on Android the gamepad and the touch
+// controls, and on the PS2 the DualShock, which report the same
+// buttons (RL_PadButtons).
 // The buttons become the keys they stand for: the player's key
 // bindings in the game, the fixed menu keys while it is up.
 //
@@ -67,6 +68,7 @@ extern int	key_strafeleft;
 extern int	key_straferight;
 extern int	key_fire;
 extern int	key_use;
+extern int	key_strafe;
 extern int	key_speed;
 
 // m_menu.c: a message is up, and it waits for y or n.
@@ -79,6 +81,48 @@ static unsigned	xrheld;
 // the menu opened or closed in between.
 static int	xrkeys[XR_NUMBUTTONS];
 
+//
+// WeaponKey
+// The number key of the next (dir 1) or previous (dir -1) weapon
+// slot the player has a weapon in, as DOOM has no key for either.
+// The slots are the keys: 1 fist and chainsaw, 3 both shotguns...
+//
+static int WeaponKey (int dir)
+{
+    static const int	slotof[NUMWEAPONS] =
+    {
+	1, 2, 3, 4, 5, 6, 7,	// fist ... BFG
+	1,			// chainsaw
+	3			// super shotgun
+    };
+    player_t*		player = &players[consoleplayer];
+    weapontype_t	current;
+    int			slot;
+    int			i;
+    int			w;
+
+    current = player->pendingweapon;
+    if (current == wp_nochange)
+	current = player->readyweapon;
+    if (current < 0 || current >= NUMWEAPONS)
+	return 0;
+
+    slot = slotof[current];
+    for (i = 0; i < 7; i++)
+    {
+	slot += dir;
+	if (slot > 7)
+	    slot = 1;
+	if (slot < 1)
+	    slot = 7;
+
+	for (w = 0; w < NUMWEAPONS; w++)
+	    if (slotof[w] == slot && player->weaponowned[w])
+		return '0' + slot;
+    }
+    return 0;
+}
+
 static int XRKey (unsigned button)
 {
     // Yes/no prompts (quit, end game, overwrite a save, nightmare)
@@ -90,6 +134,7 @@ static int XRKey (unsigned button)
 	  case XR_FIRE:
 	  case XR_USE:		return 'y';
 	  case XR_RUN:
+	  case XR_STRAFE:
 	  case XR_MAP:		return 'n';
 	  case XR_MENU:		return KEY_ESCAPE;
 	}
@@ -109,6 +154,7 @@ static int XRKey (unsigned button)
 	  case XR_FIRE:
 	  case XR_USE:		return KEY_ENTER;
 	  case XR_RUN:
+	  case XR_STRAFE:
 	  case XR_MAP:		return KEY_BACKSPACE;
 	  case XR_MENU:		return KEY_ESCAPE;
 	}
@@ -126,8 +172,11 @@ static int XRKey (unsigned button)
       case XR_FIRE:		return key_fire;
       case XR_USE:		return key_use;
       case XR_RUN:		return key_speed;
+      case XR_STRAFE:		return key_strafe;
       case XR_MENU:		return KEY_ESCAPE;
       case XR_MAP:		return KEY_TAB;
+      case XR_NEXTWEAPON:	return WeaponKey (1);
+      case XR_PREVWEAPON:	return WeaponKey (-1);
     }
     return 0;
 }
@@ -143,7 +192,7 @@ static void I_PostXRButtons (void)
 #ifdef DOOM_XR
     now |= XR_Buttons ();
 #endif
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(PLATFORM_PLAYSTATION2)
     now |= RL_PadButtons ();
 #endif
     for (i = 0; i < XR_NUMBUTTONS; i++)
@@ -297,7 +346,7 @@ void I_StartTic (void)
     if (!XR_Update ())
 	I_Quit ();
 #endif
-#if defined(DOOM_XR) || defined(__ANDROID__)
+#if defined(DOOM_XR) || defined(__ANDROID__) || defined(PLATFORM_PLAYSTATION2)
     I_PostXRButtons ();
 #endif
 

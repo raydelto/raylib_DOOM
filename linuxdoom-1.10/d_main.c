@@ -42,6 +42,10 @@ static const char rcsid[] = "$Id: d_main.c,v 1.8 1997/02/03 22:45:09 b1 Exp $";
 #include <strings.h>
 #endif
 
+#ifdef PLATFORM_PLAYSTATION2
+#include "i_ps2.h"
+#endif
+
 
 #include "doomdef.h"
 #include "doomstat.h"
@@ -636,11 +640,32 @@ void D_AddFile (char *file)
 }
 
 //
+// CanRead
+// True if the file at path can be read.
+//
+static boolean CanRead (char* path)
+{
+#ifdef PLATFORM_PLAYSTATION2
+    return I_PS2_CanRead (path);
+#else
+    return !access (path, R_OK);
+#endif
+}
+
+
+//
 // WadPath
 // Returns a malloc'ed "dir/name". If there is no file by that
 // exact name, but one differing only in case (DOOM1.WAD, as it
 // comes off DOS media), returns that one instead.
 //
+#ifdef PLATFORM_PLAYSTATION2
+static char* WadPath (char* dir, char* name)
+{
+    // Devices ("mass:", "cdrom0:\") need their own path forms.
+    return I_PS2_WadPath (dir, name);
+}
+#else
 static char* WadPath (char* dir, char* name)
 {
     char*		path;
@@ -650,7 +675,7 @@ static char* WadPath (char* dir, char* name)
     path = malloc (strlen(dir) + 1 + strlen(name) + 1);
     sprintf (path, "%s/%s", dir, name);
 
-    if (!access (path, R_OK))
+    if (CanRead (path))
 	return path;
 
     d = opendir (dir);
@@ -670,6 +695,7 @@ static char* WadPath (char* dir, char* name)
     closedir (d);
     return path;
 }
+#endif
 
 
 //
@@ -785,6 +811,11 @@ static iwadname_t iwadnames[] =
     {"freedoom2.wad",	commercial,	english},
     {"freedoom1.wad",	retail,		english},
     {"freedm.wad",	commercial,	english},
+#ifdef PLATFORM_PLAYSTATION2
+    // Freedoom's names do not fit ISO 9660's 8.3 on a PS2 CD.
+    {"fdoom2.wad",	commercial,	english},
+    {"fdoom1.wad",	retail,		english},
+#endif
 };
 
 static char* iwaddirs[] =
@@ -794,6 +825,14 @@ static char* iwaddirs[] =
 #ifdef __linux__
     "/usr/local/share/games/doom",
     "/usr/share/games/doom",
+#endif
+#ifdef PLATFORM_PLAYSTATION2
+    // "." is the folder DOOM.ELF was started from; then the
+    // PCSX2 or ps2link host, a USB stick, and the CD.
+    "host:",
+    "mass:/DOOM/",
+    "mass:",
+    "cdrom0:\\",
 #endif
 };
 
@@ -823,7 +862,7 @@ static boolean FindIWAD (int first, int last)
 	for (i = 0; i < NUMIWADNAMES; i++)
 	{
 	    path = WadPath (iwaddirs[d], iwadnames[i].name);
-	    if (!access (path, R_OK))
+	    if (CanRead (path))
 	    {
 		gamemode = iwadnames[i].mode;
 		language = iwadnames[i].language;
@@ -850,7 +889,10 @@ void IdentifyVersion (void)
     int		p;
     int		d;
 
-#ifdef NORMALUNIX
+#if defined(PLATFORM_PLAYSTATION2)
+    // Next to DOOM.ELF, the current directory (I_PS2_Init).
+    strcpy (basedefault, "default.cfg");
+#elif defined(NORMALUNIX)
     char *home;
 
     home = getenv("HOME");
@@ -864,7 +906,7 @@ void IdentifyVersion (void)
     p = M_CheckParm ("-iwad");
     if (p && p < myargc-1)
     {
-	if (access (myargv[p+1], R_OK))
+	if (!CanRead (myargv[p+1]))
 	    I_Error ("-iwad: can't read %s", myargv[p+1]);
 	if (!UseIWAD (myargv[p+1]))
 	    I_Error ("-iwad: %s is not an IWAD", myargv[p+1]);

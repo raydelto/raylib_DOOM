@@ -420,6 +420,27 @@ Hand tracking works without a controller, through
 runtime picks that profile for both hands. A Bluetooth gamepad pairs
 with the compute puck and plays as on a phone.
 
+## PlayStation 2
+
+`linuxdoom-1.10/Makefile.ps2` builds `DOOM.ELF` for the PS2 with
+[raylib4PlayStation2](https://github.com/raylib4Consoles/raylib4PlayStation2)
+(raylib's `PLATFORM_PLAYSTATION2` backend on ps2gl). The ps2dev
+toolchain and the libraries come in a Docker image:
+
+```sh
+docker build -t raylibdoom-ps2 packaging/ps2
+docker run --rm -v "$PWD:/src" -w /src raylibdoom-ps2 packaging/ps2/build.sh
+# build-ps2/DOOM.ELF
+```
+
+It finds its IWAD next to `DOOM.ELF`, on `host:` (PCSX2, ps2link),
+on a USB stick (`mass:/DOOM/`) or on the CD (`cdrom0:\`, 8.3 names),
+and plays with the DualShock 2. There is no sound yet. The `ps2` job
+in `.github/workflows/build.yml` uploads `DOOM.ELF` as the
+`raylibdoom-ps2` artifact. See `packaging/ps2/README.txt` for
+building without Docker, the controls, and running it in PCSX2 or on
+a console.
+
 ## What changed
 
 - `i_raylib.c` / `i_raylib.h`: new, the only code that talks to raylib.
@@ -449,6 +470,12 @@ with the compute puck and plays as on a phone.
   `i_raylib.c`, and the EGL / OpenGL ES graphics binding and
   `xrInitializeLoaderKHR` in `i_xr.c` for the `xr` flavor of the APK
   in `android/`.
+- PlayStation 2 (`PLATFORM_PLAYSTATION2`, `Makefile.ps2`): `i_ps2.c` /
+  `i_ps2.h` (the IOP modules, PS2 file paths, the analog sticks); in
+  `i_raylib.c` the frame upload ps2gl needs, the DualShock mapping
+  and silent audio stubs; single player only in `i_net.c`; the IWAD
+  search, zone size and file lengths in `d_main.c`, `i_system.c`,
+  `w_wad.c` and `m_misc.c`. `i_xr.h` gained strafe and weapon buttons.
 - `doomkeys.h`: the key codes, split out of `doomdef.h`.
 - Browser build: `web/web.cmake` and `web/shell.html` (the page, with
   the IndexedDB mount and the WAD picker); `d_main.c` splits the game

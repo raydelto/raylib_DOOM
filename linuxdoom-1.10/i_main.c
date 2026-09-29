@@ -41,6 +41,10 @@ rcsid[] = "$Id: i_main.c,v 1.4 1997/02/03 22:45:10 b1 Exp $";
 #include "i_android.h"
 #endif
 
+#ifdef PLATFORM_PLAYSTATION2
+#include "i_ps2.h"
+#endif
+
 #ifdef __APPLE__
 #include <stdio.h>
 #include <stdlib.h>
@@ -258,6 +262,11 @@ main
 { 
     myargc = argc; 
     myargv = argv; 
+
+#ifdef PLATFORM_PLAYSTATION2
+    // Before any file is opened: it resets the IOP.
+    I_PS2_Init (argc, argv);
+#endif
 
 #ifdef __APPLE__
     BundleSetup (argc, argv);

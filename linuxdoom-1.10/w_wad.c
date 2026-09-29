@@ -86,12 +86,23 @@ static void W_Strupr (char* s)
 
 static int W_FileLength (int handle) 
 { 
+#ifdef PLATFORM_PLAYSTATION2
+    // Not every PS2 device can stat an open file.
+    int		length;
+
+    length = lseek (handle, 0, SEEK_END);
+    if (length < 0 || lseek (handle, 0, SEEK_SET) != 0)
+	I_Error ("Error seeking");
+
+    return length;
+#else
     struct stat	fileinfo;
     
     if (fstat (handle,&fileinfo) == -1)
 	I_Error ("Error fstating");
 
     return fileinfo.st_size;
+#endif
 }
 
 
@@ -181,8 +192,15 @@ void W_AddFile (char *filename)
 
     printf (" adding %s\n",filename);
     startlump = numlumps;
+
+    length = strlen (filename);
+#ifdef PLATFORM_PLAYSTATION2
+    // ISO 9660 names on the CD end in a version, "DOOM2.WAD;1".
+    if (length > 2 && !strcmp (filename+length-2, ";1"))
+	length -= 2;
+#endif
 	
-    if (strcmpi (filename+strlen(filename)-3 , "wad" ) )
+    if (length < 3 || strncasecmp (filename+length-3 , "wad", 3) )
     {
 	// single lump file
 	fileinfo = &singleinfo;
