@@ -3,3 +3,5 @@ dist/
 linuxdoom-1.10/linux/
 build-xr/
 build-web/
+linuxdoom-1.10/ps2/
+build-ps2/

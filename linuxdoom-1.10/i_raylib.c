@@ -29,8 +29,15 @@
 #include "raylib.h"
 
 #include "i_raylib.h"
-#if defined(DOOM_XR) || defined(__ANDROID__)
+#if defined(DOOM_XR) || defined(__ANDROID__) || defined(PLATFORM_PLAYSTATION2)
 #include "i_xr.h"
+#endif
+
+#ifdef PLATFORM_PLAYSTATION2
+#include <malloc.h>
+#include <kernel.h>
+#include <GL/gl.h>
+#include "i_ps2.h"
 #endif
 
 #ifdef __EMSCRIPTEN__
@@ -80,6 +87,105 @@ static int		prescale;
 #define MAXPRESCALE	8
 
 
+#ifdef PLATFORM_PLAYSTATION2
+//
+// ps2gl (OpenGL 1.1 on the GS) has no framebuffer objects, so no
+// LoadRenderTexture, and no glTexSubImage2D, so UpdateTexture does
+// nothing. It keeps a texture's image in main RAM and sends it to
+// the GS when drawn, so each frame is handed to it as a new image
+// with glTexImage2D instead. Two images, as the GS may still be
+// reading the last frame while the game draws the next.
+//
+// The GS samples a texture as 2^n texels square whatever its size,
+// so the frame sits in the corner of a 512x256 image.
+//
+// The frame fills the whole 640x448 picture: a TV shows that at
+// 4:3, as a VGA monitor showed DOOM's 320x200.
+//
+#define PS2TEXW		512
+#define PS2TEXH		256
+
+static unsigned char*	ps2images[2];
+static int		ps2image;
+
+static void PS2_InitVideo (void)
+{
+    Image	blank;
+    int		i;
+
+    for (i = 0; i < 2; i++)
+    {
+	ps2images[i] = memalign (64, PS2TEXW*PS2TEXH*4);
+	if (!ps2images[i])
+	{
+	    fprintf (stderr, "RL_InitVideo: no memory for the frame\n");
+	    exit (1);
+	}
+	memset (ps2images[i], 0, PS2TEXW*PS2TEXH*4);
+    }
+
+    // Only for a texture name: ps2gl gets each frame's image in
+    // PS2_UploadFrame. Sized as that image, which DrawTexturePro
+    // divides by for texture coordinates.
+    blank = GenImageColor (8, 8, BLACK);
+    screentex = LoadTextureFromImage (blank);
+    UnloadImage (blank);
+    screentex.width = PS2TEXW;
+    screentex.height = PS2TEXH;
+}
+
+static void PS2_UploadFrame (const unsigned char* rgba)
+{
+    unsigned char*	image = ps2images[ps2image];
+    int			row = screenwidth*4;
+    int			y;
+
+    // One more column and row copied from the edge, so smooth
+    // scaling does not blend the last pixels with the black beyond.
+    for (y = 0; y < screenheight; y++)
+    {
+	unsigned char*	dst = image + y*PS2TEXW*4;
+
+	memcpy (dst, rgba + y*row, row);
+	memcpy (dst + row, dst + row - 4, 4);
+    }
+    memcpy (image + screenheight*PS2TEXW*4,
+	    image + (screenheight-1)*PS2TEXW*4, row + 4);
+
+    // The GS reads it by DMA, from memory, not the cache.
+    FlushCache (0);
+
+    glBindTexture (GL_TEXTURE_2D, screentex.id);
+    glTexImage2D (GL_TEXTURE_2D, 0, GL_RGBA, PS2TEXW, PS2TEXH, 0,
+		  GL_RGBA, GL_UNSIGNED_BYTE, image);
+    glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glBindTexture (GL_TEXTURE_2D, 0);
+
+    ps2image ^= 1;
+}
+
+static void PS2_Present (const unsigned char* rgba)
+{
+    Rectangle	src;
+    Rectangle	dst;
+
+    PS2_UploadFrame (rgba);
+
+    src = (Rectangle) { 0, 0, (float)screenwidth, (float)screenheight };
+    dst = (Rectangle) { 0, 0, (float)GetScreenWidth (), (float)GetScreenHeight () };
+
+    BeginDrawing ();
+    ClearBackground (BLACK);
+    // Opaque: the GS takes 0x80 as full alpha, DOOM's 0xff would
+    // blend oddly.
+    glDisable (GL_BLEND);
+    DrawTexturePro (screentex, src, dst, (Vector2) { 0, 0 }, 0.0f, WHITE);
+    EndDrawing ();
+}
+#endif
+
+
 void RL_InitVideo (int width, int height, int scale, int fullscreen)
 {
     screenwidth = width;
@@ -89,7 +195,13 @@ void RL_InitVideo (int width, int height, int scale, int fullscreen)
     SetConfigFlags (FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT);
 
     // DOOM's 320x200 was shown on 4:3 monitors with tall pixels.
-#ifdef __ANDROID__
+#if defined(PLATFORM_PLAYSTATION2)
+    // Always NTSC 640x448, whatever is asked for.
+    InitWindow (640, 448, WINDOWTITLE);
+    SetExitKey (KEY_NULL);
+    PS2_InitVideo ();
+    return;
+#elif defined(__ANDROID__)
     // The whole display (0x0), so RL_Present letterboxes to 4:3
     // itself and the touch controls can use the side bars; raylib
     // would letterbox a 4:3 window without them.
@@ -182,6 +294,11 @@ void RL_Present (const unsigned char* rgba)
     Rectangle	src;
     Rectangle	big;
     Rectangle	dst;
+
+#ifdef PLATFORM_PLAYSTATION2
+    PS2_Present (rgba);
+    return;
+#endif
 
     UpdateTexture (screentex, rgba);
 
@@ -502,6 +619,10 @@ int RL_GetEvent (rl_event_t* ev)
 
 void RL_SetMouseGrab (int grab)
 {
+#ifdef PLATFORM_PLAYSTATION2
+    // No mouse.
+    return;
+#endif
     if (grab && !IsWindowFocused ())
 	grab = 0;
 #ifdef __ANDROID__
@@ -530,6 +651,88 @@ void RL_SetMouseGrab (int grab)
     lastmouse = GetMousePosition ();
 }
 
+
+
+#ifdef PLATFORM_PLAYSTATION2
+//
+// DUALSHOCK 2
+//
+// Reported as the controller buttons of i_xr.h, like Android's
+// gamepad, which i_video.c turns into keys: the player's key
+// bindings in the game, the menu keys in menus (X is Enter there),
+// y and n in a yes/no prompt.
+//
+//   left stick		move and strafe
+//   right stick	turn
+//   d-pad		move and turn
+//   Square, R2		fire
+//   X (Cross)		use; Enter in menus
+//   Circle		strafe while held; back in menus
+//   Triangle, L2	run while held
+//   L1, R1		previous, next weapon
+//   Start		menu (Esc)
+//   Select		automap (Tab)
+//
+// raylib4PlayStation2 reports the buttons but not the sticks, which
+// come from libpad (I_PS2_Sticks).
+//
+
+// Stick deflection that counts as a key press.
+#define PADSTICK	0.5f
+
+static int PadDown (int button)
+{
+    return IsGamepadButtonDown (0, button);
+}
+
+unsigned RL_PadButtons (void)
+{
+    unsigned	held = 0;
+    float	lx;
+    float	ly;
+    float	rx;
+    float	ry;
+
+    if (!IsGamepadAvailable (0))
+	return 0;
+
+    I_PS2_Sticks (&lx, &ly, &rx, &ry);
+
+    if (ly < -PADSTICK || PadDown (GAMEPAD_BUTTON_LEFT_FACE_UP))
+	held |= XR_FORWARD;
+    if (ly > PADSTICK || PadDown (GAMEPAD_BUTTON_LEFT_FACE_DOWN))
+	held |= XR_BACK;
+    if (lx < -PADSTICK)
+	held |= XR_STRAFELEFT;
+    if (lx > PADSTICK)
+	held |= XR_STRAFERIGHT;
+    if (rx < -PADSTICK || PadDown (GAMEPAD_BUTTON_LEFT_FACE_LEFT))
+	held |= XR_TURNLEFT;
+    if (rx > PADSTICK || PadDown (GAMEPAD_BUTTON_LEFT_FACE_RIGHT))
+	held |= XR_TURNRIGHT;
+
+    if (PadDown (GAMEPAD_BUTTON_RIGHT_FACE_LEFT)		// Square
+	|| PadDown (GAMEPAD_BUTTON_RIGHT_TRIGGER_2))
+	held |= XR_FIRE;
+    if (PadDown (GAMEPAD_BUTTON_RIGHT_FACE_DOWN))		// Cross
+	held |= XR_USE;
+    if (PadDown (GAMEPAD_BUTTON_RIGHT_FACE_RIGHT))		// Circle
+	held |= XR_STRAFE;
+    if (PadDown (GAMEPAD_BUTTON_RIGHT_FACE_UP)			// Triangle
+	|| PadDown (GAMEPAD_BUTTON_LEFT_TRIGGER_2))
+	held |= XR_RUN;
+    if (PadDown (GAMEPAD_BUTTON_LEFT_TRIGGER_1))
+	held |= XR_PREVWEAPON;
+    if (PadDown (GAMEPAD_BUTTON_RIGHT_TRIGGER_1))
+	held |= XR_NEXTWEAPON;
+    if (PadDown (GAMEPAD_BUTTON_MIDDLE_RIGHT))			// Start
+	held |= XR_MENU;
+    if (PadDown (GAMEPAD_BUTTON_MIDDLE_LEFT))			// Select
+	held |= XR_MAP;
+
+    return held;
+}
+#endif
 
 
 #ifdef __ANDROID__
@@ -734,7 +937,7 @@ static void DrawTouchControls (void)
 // A native Windows build has none of this to work around.
 //
 
-#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__) && !defined(PLATFORM_PLAYSTATION2)
 
 typedef struct GLFWwindow GLFWwindow;
 typedef struct GLFWcursor GLFWcursor;
@@ -1188,6 +1391,38 @@ static void ToggleFullscreenWindow (void)
 // silence on underrun.
 //
 
+#ifdef PLATFORM_PLAYSTATION2
+
+//
+// raylib4PlayStation2 has no raudio (miniaudio has no PS2 backend),
+// so there is no audio device yet: the game runs silent. Sound
+// effects and music will go through audsrv.
+//
+int RL_InitAudio (void)
+{
+    return 0;
+}
+
+int RL_OpenStream (int id, int samplerate)
+{
+    return 0;
+}
+
+void RL_ShutdownAudio (void)
+{
+}
+
+int RL_AudioQueued (int id)
+{
+    return 0;
+}
+
+void RL_QueueAudio (int id, const short* samples, int frames)
+{
+}
+
+#else
+
 #define RINGFRAMES	8192	// power of two
 
 typedef struct
@@ -1316,6 +1551,8 @@ void RL_QueueAudio (int id, const short* samples, int frames)
 
     atomic_store_explicit (&s->write, wr + frames, memory_order_release);
 }
+
+#endif	// PLATFORM_PLAYSTATION2
 
 
 

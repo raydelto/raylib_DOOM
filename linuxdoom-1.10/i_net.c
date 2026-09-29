@@ -29,6 +29,43 @@ rcsid[] = "$Id: m_bbox.c,v 1.1 1997/02/03 22:45:10 b1 Exp $";
 
 #include <errno.h>
 
+#ifdef PLATFORM_PLAYSTATION2
+
+//
+// No network stack on the PS2 (yet): single player only.
+//
+#include "i_system.h"
+#include "d_event.h"
+#include "d_net.h"
+#include "m_argv.h"
+
+#include "doomstat.h"
+
+#include "i_net.h"
+
+void I_InitNetwork (void)
+{
+    if (M_CheckParm ("-net"))
+	I_Error ("I_InitNetwork: no network games on the PlayStation 2");
+
+    doomcom = malloc (sizeof (*doomcom) );
+    memset (doomcom, 0, sizeof(*doomcom) );
+
+    netgame = false;
+    doomcom->id = DOOMCOM_ID;
+    doomcom->numplayers = doomcom->numnodes = 1;
+    doomcom->deathmatch = false;
+    doomcom->consoleplayer = 0;
+    doomcom->ticdup = 1;
+}
+
+void I_NetCmd (void)
+{
+    I_Error ("Bad net cmd: %i\n",doomcom->command);
+}
+
+#else
+
 #ifdef _WIN32
 // Lean, or windows.h brings rpcndr.h and its own "boolean".
 #define WIN32_LEAN_AND_MEAN
@@ -400,3 +437,4 @@ void I_NetCmd (void)
 	I_Error ("Bad net cmd: %i\n",doomcom->command);
 }
 
+#endif	// PLATFORM_PLAYSTATION2

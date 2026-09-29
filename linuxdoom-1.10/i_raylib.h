@@ -71,7 +71,7 @@ int RL_GetEvent (rl_event_t* ev);
 // Captures (hides and locks) the mouse pointer.
 void RL_SetMouseGrab (int grab);
 
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(PLATFORM_PLAYSTATION2)
 // Gamepad and touch controls held, as of the last RL_PumpEvents,
 // as the controller buttons of i_xr.h.
 unsigned RL_PadButtons (void);

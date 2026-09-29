@@ -36,6 +36,7 @@ rcsid[] = "$Id: m_bbox.c,v 1.1 1997/02/03 22:45:10 b1 Exp $";
 #include <unistd.h>
 
 #include "doomdef.h"
+#include "m_argv.h"
 #include "m_misc.h"
 #include "i_video.h"
 #include "i_sound.h"
@@ -82,11 +83,42 @@ int  I_GetHeapSize (void)
     return mb_used*1024*1024;
 }
 
+#ifdef PLATFORM_PLAYSTATION2
+//
+// The EE has 32 MB for everything. DOOM.ELF, raylib, ps2gl's DMA
+// buffers and the frame textures need a few; 16 MB of zone is twice
+// what DOS DOOM ran in, pointers being 32-bit again. -mb N asks for
+// another size; if it is not there, as much as there is, down to 6.
+//
+byte* I_ZoneBase (int*	size)
+{
+    byte*	zone = NULL;
+    int		p;
+
+    p = M_CheckParm ("-mb");
+    if (p && p < myargc-1 && atoi (myargv[p+1]) > 0)
+	mb_used = atoi (myargv[p+1]);
+
+    for ( ; mb_used > 6; mb_used--)
+    {
+	zone = (byte *) malloc (mb_used*1024*1024);
+	if (zone)
+	    break;
+    }
+    if (mb_used <= 6)
+	zone = (byte *) malloc (mb_used*1024*1024);
+
+    printf ("I_ZoneBase: %d MB zone\n", mb_used);
+    *size = mb_used*1024*1024;
+    return zone;
+}
+#else
 byte* I_ZoneBase (int*	size)
 {
     *size = mb_used*1024*1024;
     return (byte *) malloc (*size);
 }
+#endif
 
 
 

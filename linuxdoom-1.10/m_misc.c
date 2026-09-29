@@ -142,15 +142,24 @@ M_ReadFile
   byte**	buffer )
 {
     int	handle, count, length;
+#ifndef PLATFORM_PLAYSTATION2
     struct stat	fileinfo;
+#endif
     byte		*buf;
 	
     handle = open (name, O_RDONLY | O_BINARY, 0666);
     if (handle == -1)
 	I_Error ("Couldn't read file %s", name);
+#ifdef PLATFORM_PLAYSTATION2
+    // Not every PS2 device can stat an open file.
+    length = lseek (handle, 0, SEEK_END);
+    if (length < 0 || lseek (handle, 0, SEEK_SET) != 0)
+	I_Error ("Couldn't read file %s", name);
+#else
     if (fstat (handle,&fileinfo) == -1)
 	I_Error ("Couldn't read file %s", name);
     length = fileinfo.st_size;
+#endif
     buf = Z_Malloc (length, PU_STATIC, NULL);
     count = read (handle, buf, length);
     close (handle);
