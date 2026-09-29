@@ -39,7 +39,7 @@ rcsid[] = "$Id: i_x.c,v 1.6 1997/02/03 22:45:10 b1 Exp $";
 #include "doomdef.h"
 
 #include "i_raylib.h"
-#ifdef DOOM_XR
+#if defined(DOOM_XR) || defined(__ANDROID__)
 #include "i_xr.h"
 #endif
 
@@ -52,9 +52,10 @@ rcsid[] = "$Id: i_x.c,v 1.6 1997/02/03 22:45:10 b1 Exp $";
 extern int	usemouse;
 
 
-#ifdef DOOM_XR
+#if defined(DOOM_XR) || defined(__ANDROID__)
 //
-// Headset controllers.
+// Headset controllers, and on Android the gamepad and the touch
+// controls, which report the same buttons (RL_PadButtons).
 // The buttons become the keys they stand for: the player's key
 // bindings in the game, the fixed menu keys while it is up.
 //
@@ -138,7 +139,13 @@ static void I_PostXRButtons (void)
     int		i;
     event_t	event;
 
-    now = XR_Buttons ();
+    now = 0;
+#ifdef DOOM_XR
+    now |= XR_Buttons ();
+#endif
+#ifdef __ANDROID__
+    now |= RL_PadButtons ();
+#endif
     for (i = 0; i < XR_NUMBUTTONS; i++)
     {
 	bit = 1u << i;
@@ -160,7 +167,9 @@ static void I_PostXRButtons (void)
     }
     xrheld = now;
 }
+#endif
 
+#ifdef DOOM_XR
 
 //
 // I_InitXR
@@ -273,6 +282,8 @@ void I_StartTic (void)
 #ifdef DOOM_XR
     if (!XR_Update ())
 	I_Quit ();
+#endif
+#if defined(DOOM_XR) || defined(__ANDROID__)
     I_PostXRButtons ();
 #endif
 

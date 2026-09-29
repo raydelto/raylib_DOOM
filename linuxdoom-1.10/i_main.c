@@ -37,6 +37,10 @@ rcsid[] = "$Id: i_main.c,v 1.4 1997/02/03 22:45:10 b1 Exp $";
 #include <unistd.h>
 #endif
 
+#ifdef __ANDROID__
+#include "i_android.h"
+#endif
+
 #ifdef __APPLE__
 #include <stdio.h>
 #include <stdlib.h>
@@ -257,6 +261,10 @@ main
 
 #ifdef __APPLE__
     BundleSetup (argc, argv);
+#endif
+
+#ifdef __ANDROID__
+    I_AndroidSetup ();
 #endif
 
 #ifdef __EMSCRIPTEN__

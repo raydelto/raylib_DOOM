@@ -1,0 +1,159 @@
+// The APK: ../../CMakeLists.txt built with the NDK as
+// libraylibdoom.so (-DRAYLIB_DOOM_ANDROID=ON), run by NativeActivity,
+// with Freedoom: Phase 1 in its assets.
+//
+//   flat: a normal Android app (phones, tablets, Android XR panel)
+//   xr:   the same, plus OpenXR (Android XR Full Space)
+//
+// ./gradlew assembleFlatDebug assembleXrDebug
+
+import java.security.MessageDigest
+import java.util.zip.ZipFile
+
+plugins {
+    id 'com.android.application'
+}
+
+// Freedoom is BSD licensed and may be bundled. As in web/web.cmake,
+// it is downloaded and checked here rather than kept in the
+// repository; -PfreedoomZip=/path/to/freedoom-0.13.0.zip uses a zip
+// you already have.
+def freedoomVersion = '0.13.0'
+def freedoomSha256 = '3f9b264f3e3ce503b4fb7f6bdcb1f419d93c7b546f4df3e874dd878db9688f59'
+
+abstract class FreedoomAssets extends DefaultTask {
+    @Input abstract Property<String> getVersion()
+    @Input abstract Property<String> getSha256()
+    @Input @Optional abstract Property<String> getZipPath()
+    @Internal abstract DirectoryProperty getCacheDir()
+    @OutputDirectory abstract DirectoryProperty getOutputDir()
+
+    @TaskAction
+    void unpack() {
+        String v = version.get()
+        File zip = zipPath.isPresent()
+            ? new File(zipPath.get())
+            : new File(cacheDir.get().asFile, "freedoom-${v}.zip")
+        if (!zip.exists()) {
+            zip.parentFile.mkdirs()
+            File part = new File(zip.path + '.part')
+            def url = "https://github.com/freedoom/freedoom/releases/download/v${v}/freedoom-${v}.zip"
+            logger.lifecycle("Downloading ${url}")
+            new URL(url).withInputStream { input -> part.withOutputStream { it << input } }
+            part.renameTo(zip)
+        }
+
+        def md = MessageDigest.getInstance('SHA-256')
+        zip.withInputStream { input ->
+            byte[] buf = new byte[65536]
+            int n
+            while ((n = input.read(buf)) > 0)
+                md.update(buf, 0, n)
+        }
+        String hash = md.digest().encodeHex().toString()
+        if (hash != sha256.get())
+            throw new GradleException("${zip} is not freedoom-${v}.zip (SHA-256 ${hash})")
+
+        // The names i_android.c copies out of the APK.
+        def names = ["freedoom-${v}/freedoom1.wad": 'freedoom1.wad',
+                     "freedoom-${v}/COPYING.txt": 'freedoom-COPYING.txt']
+        File out = outputDir.get().asFile
+        out.mkdirs()
+        new ZipFile(zip).withCloseable { z ->
+            names.each { entry, name ->
+                def e = z.getEntry(entry)
+                if (e == null)
+                    throw new GradleException("${zip} has no ${entry}")
+                new File(out, name).withOutputStream { it << z.getInputStream(e) }
+            }
+        }
+    }
+}
+
+def freedoom = tasks.register('freedoomAssets', FreedoomAssets) {
+    version = freedoomVersion
+    sha256 = freedoomSha256
+    zipPath = providers.gradleProperty('freedoomZip')
+    cacheDir = layout.buildDirectory.dir('freedoom')
+    outputDir = layout.buildDirectory.dir('generated/freedoom')
+}
+
+android {
+    namespace 'com.raylib.doom'
+    compileSdk 36
+    ndkVersion '28.1.13356709'
+
+    defaultConfig {
+        applicationId 'com.raylib.doom'
+        // AAudio for raylib's miniaudio; the OpenXR loader wants 24.
+        minSdk 26
+        targetSdk 34
+        versionCode 1
+        versionName '1.10'
+
+        ndk {
+            // Devices, and the x86_64 emulator.
+            abiFilters 'arm64-v8a', 'x86_64'
+        }
+        externalNativeBuild {
+            cmake {
+                arguments '-DRAYLIB_DOOM_ANDROID=ON'
+                targets 'raylibdoom'
+            }
+        }
+    }
+
+    flavorDimensions = ['output']
+    productFlavors {
+        flat {
+            dimension 'output'
+        }
+        xr {
+            dimension 'output'
+            applicationIdSuffix '.xr'
+            externalNativeBuild {
+                cmake {
+                    arguments '-DRAYLIB_DOOM_ANDROID_XR=ON'
+                }
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            // Signed with the debug key so it installs as it is;
+            // sign it with your own key to publish it.
+            signingConfig signingConfigs.debug
+        }
+    }
+
+    buildFeatures {
+        prefab true
+    }
+
+    externalNativeBuild {
+        cmake {
+            path '../../CMakeLists.txt'
+            version '3.22.1'
+        }
+    }
+
+    packagingOptions {
+        jniLibs {
+            // NativeActivity dlopens the library from the APK.
+            useLegacyPackaging false
+        }
+    }
+}
+
+androidComponents {
+    onVariants(selector().all()) { variant ->
+        variant.sources.assets.addGeneratedSourceDirectory(freedoom) { it.outputDir }
+    }
+}
+
+dependencies {
+    // The Khronos OpenXR loader, as a prefab package for CMake.
+    xrImplementation 'org.khronos.openxr:openxr_loader_for_android:1.1.52'
+}
