@@ -205,7 +205,7 @@ if(RAYLIB_DOOM_XR)
   target_include_directories(xr_test PRIVATE ${DOOM_DIR}
     $<TARGET_PROPERTY:raylib,INTERFACE_INCLUDE_DIRECTORIES>)
   target_link_libraries(xr_test PRIVATE
-    OpenXR::openxr_loader OpenGL::GLX X11::X11)
+    OpenXR::openxr_loader OpenGL::GLX X11::X11 m)
   if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(xr_test PRIVATE
       -fsanitize=address,undefined -fno-sanitize-recover=undefined)

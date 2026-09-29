@@ -55,6 +55,11 @@ static uint32_t	lastlayers;
 static int	loadedfbos, unloadedfbos;
 static int	swapinterval = -1;	// last glfwSwapInterval
 
+static XrEnvironmentBlendMode	fake_blendmode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
+static uint32_t	fake_blendmodes = 1;
+static XrFovf	fake_fov;	// both eyes'
+static int	locates;
+
 
 XRAPI_ATTR XrResult XRAPI_CALL xrEnumerateInstanceExtensionProperties (
     const char* layer, uint32_t capacity, uint32_t* count,
@@ -150,9 +155,29 @@ XRAPI_ATTR XrResult XRAPI_CALL xrEnumerateEnvironmentBlendModes (
     (void)inst;
     (void)sys;
     (void)type;
-    *count = 1;
-    if (capacity)
+    // One mode, or opaque and then that one.
+    *count = fake_blendmodes;
+    if (capacity >= fake_blendmodes)
+    {
 	modes[0] = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
+	modes[fake_blendmodes - 1] = fake_blendmode;
+    }
+    return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL xrLocateViews (
+    XrSession s, const XrViewLocateInfo* info, XrViewState* state,
+    uint32_t capacity, uint32_t* count, XrView* views)
+{
+    uint32_t	i;
+
+    (void)s;
+    (void)info;
+    (void)state;
+    locates++;
+    *count = 2;
+    for (i = 0; i < capacity && i < 2; i++)
+	views[i].fov = fake_fov;
     return XR_SUCCESS;
 }
 
@@ -317,6 +342,13 @@ static void Reset (void)
     fake_pollresult = XR_EVENT_UNAVAILABLE;
     quit = 0;
     swapinterval = -1;
+    fake_blendmode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
+    fake_blendmodes = 1;
+    locates = 0;
+    fitscreen = 0;
+    blacklift = -1;
+    screendistance = 2.5f;
+    screenwidth = MAXWIDTH;
 }
 
 
@@ -557,6 +589,69 @@ static void TestBadIndex (void)
 }
 
 
+// Black is lifted by default only on see-through glasses.
+static void TestBlackLift (void)
+{
+    Reset ();
+    StartSession ();
+    Expect (blacklift == 0, "opaque: black lifted to %f", blacklift);
+
+    Reset ();
+    fake_blendmode = XR_ENVIRONMENT_BLEND_MODE_ADDITIVE;
+    StartSession ();
+    Expect (blacklift == ADDITIVELIFT, "additive: black lifted to %f",
+	    blacklift);
+
+    // Listed after opaque, as the Aura does.
+    Reset ();
+    fake_blendmodes = 2;
+    fake_blendmode = XR_ENVIRONMENT_BLEND_MODE_ADDITIVE;
+    StartSession ();
+    Expect (blendmode == XR_ENVIRONMENT_BLEND_MODE_OPAQUE,
+	    "opaque, additive: not using opaque");
+    Expect (blacklift == ADDITIVELIFT, "opaque, additive: black lifted"
+	    " to %f", blacklift);
+
+    Reset ();
+    fake_blendmode = XR_ENVIRONMENT_BLEND_MODE_ADDITIVE;
+    blacklift = 0;
+    StartSession ();
+    Expect (blacklift == 0, "-xrlift 0: black lifted to %f", blacklift);
+}
+
+// Without -xrwidth the screen shrinks to narrow glasses once, and
+// a wide headset keeps the old 3.2m.
+static void TestFitScreen (void)
+{
+    float	want;
+
+    Reset ();
+    StartSession ();
+    fitscreen = 1;
+    fake_fov.angleLeft = -0.5f;	// 57 x 33 degrees, like the Aura
+    fake_fov.angleRight = 0.5f;
+    fake_fov.angleUp = 0.29f;
+    fake_fov.angleDown = -0.29f;
+    XR_Present (Draw);
+    XR_Present (Draw);
+    want = 2 * 2.5f * tanf (0.29f * FITFOV) * 4.0f / 3.0f;
+    Expect (locates == 1, "fit: located views %d times", locates);
+    Expect (fabsf (screenwidth - want) < 0.01f,
+	    "fit: %.2fm wide, not %.2fm", screenwidth, want);
+
+    Reset ();
+    StartSession ();
+    fitscreen = 1;
+    fake_fov.angleLeft = -0.9f;
+    fake_fov.angleRight = 0.9f;
+    fake_fov.angleUp = 0.9f;
+    fake_fov.angleDown = -0.9f;
+    XR_Present (Draw);
+    Expect (screenwidth == MAXWIDTH, "wide headset: %.2fm wide",
+	    screenwidth);
+}
+
+
 int main (void)
 {
     TestManyExtensions ();
@@ -574,6 +669,8 @@ int main (void)
     TestVsync ();
     TestPrime ();
     TestBadIndex ();
+    TestBlackLift ();
+    TestFitScreen ();
     Reset ();
 
     if (failures)
