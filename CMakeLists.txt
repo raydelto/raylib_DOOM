@@ -150,4 +150,18 @@ if(RAYLIB_DOOM_XR)
       -Wno-unused-but-set-variable -Wno-unused-const-variable
       ${DOOM_SIGNED_CHAR})
   endif()
+
+  # i_xr.c against a fake runtime: enumeration bounds and
+  # swapchain image failures. Needs only rlgl.h, not raylib.
+  add_executable(xr_test tests/xr_test.c)
+  target_include_directories(xr_test PRIVATE ${DOOM_DIR}
+    $<TARGET_PROPERTY:raylib,INTERFACE_INCLUDE_DIRECTORIES>)
+  target_link_libraries(xr_test PRIVATE
+    OpenXR::openxr_loader OpenGL::GLX X11::X11)
+  if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(xr_test PRIVATE
+      -fsanitize=address,undefined -fno-sanitize-recover=undefined)
+    target_link_options(xr_test PRIVATE -fsanitize=address,undefined)
+  endif()
+  add_test(NAME xr COMMAND xr_test)
 endif()

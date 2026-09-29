@@ -35,6 +35,7 @@
 //-----------------------------------------------------------------------------
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include <X11/Xlib.h>
@@ -56,7 +57,9 @@
 #define IMAGEWIDTH	1600
 #define IMAGEHEIGHT	1200
 
-#define MAXIMAGES	8
+// Tries of an enumeration whose list grows between the call that
+// sizes it and the call that fills it.
+#define ENUMTRIES	4
 
 #ifndef GL_SRGB8_ALPHA8
 #define GL_SRGB8_ALPHA8	0x8C43
@@ -78,8 +81,16 @@ static XrSpace		space = XR_NULL_HANDLE;
 static XrSwapchain	swapchain = XR_NULL_HANDLE;
 static XrEnvironmentBlendMode	blendmode;
 
-static unsigned int	fbos[MAXIMAGES];
+static unsigned int*	fbos;		// one per swapchain image
 static uint32_t		numimages;
+static uint32_t		numfbos;	// those made so far
+
+// The swapchain image being drawn. One whose wait failed stays
+// acquired, as OpenXR allows neither releasing it nor acquiring
+// another, and is waited for again next frame.
+enum { IMAGE_FREE, IMAGE_ACQUIRED, IMAGE_WAITED };
+static int		imagestate;
+static uint32_t		imageindex;
 
 static XrSessionState	state = XR_SESSION_STATE_UNKNOWN;
 static int		running;	// between xrBeginSession and xrEndSession
@@ -166,38 +177,57 @@ static XrPath Path (const char* s)
 static int CreateInstance (void)
 {
     XrInstanceCreateInfo	info;
-    XrExtensionProperties	props[128];
+    XrExtensionProperties*	props;
     uint32_t			count;
+    uint32_t			capacity;
+    int				tries;
     uint32_t			i;
     int				havegl;
     XrResult			r;
     const char*			extensions[] = { XR_KHR_OPENGL_ENABLE_EXTENSION_NAME };
 
-    count = 0;
-    r = xrEnumerateInstanceExtensionProperties (NULL, 0, &count, NULL);
-    if (XR_FAILED (r))
+    props = NULL;
+    r = XR_ERROR_SIZE_INSUFFICIENT;
+    for (tries = 0; tries < ENUMTRIES && r == XR_ERROR_SIZE_INSUFFICIENT; tries++)
     {
-	fprintf (stderr,
-		 "XR: no OpenXR runtime found (%s).\n"
-		 "XR: Start one (for Monado: monado-service), or point\n"
-		 "XR: XR_RUNTIME_JSON at its manifest, e.g.\n"
-		 "XR:   XR_RUNTIME_JSON=/usr/share/openxr/1/openxr_monado.json\n",
-		 ResultName (r));
+	free (props);
+	props = NULL;
+	count = 0;
+	r = xrEnumerateInstanceExtensionProperties (NULL, 0, &count, NULL);
+	if (XR_FAILED (r))
+	{
+	    fprintf (stderr,
+		     "XR: no OpenXR runtime found (%s).\n"
+		     "XR: Start one (for Monado: monado-service), or point\n"
+		     "XR: XR_RUNTIME_JSON at its manifest, e.g.\n"
+		     "XR:   XR_RUNTIME_JSON=/usr/share/openxr/1/openxr_monado.json\n",
+		     ResultName (r));
+	    return 0;
+	}
+	capacity = count;
+	props = calloc (capacity ? capacity : 1, sizeof(*props));
+	if (!props)
+	    return 0;
+	for (i = 0; i < capacity; i++)
+	    props[i].type = XR_TYPE_EXTENSION_PROPERTIES;
+	r = xrEnumerateInstanceExtensionProperties (NULL, capacity, &count,
+						    props);
+    }
+    if (!Check (r, "xrEnumerateInstanceExtensionProperties"))
+    {
+	free (props);
 	return 0;
     }
-    if (count > 128)
-	count = 128;
-    for (i = 0; i < count; i++)
-    {
-	props[i].type = XR_TYPE_EXTENSION_PROPERTIES;
-	props[i].next = NULL;
-    }
-    xrEnumerateInstanceExtensionProperties (NULL, count, &count, props);
+    if (count > capacity)
+	count = capacity;
 
     havegl = 0;
     for (i = 0; i < count; i++)
-	if (!strcmp (props[i].extensionName, XR_KHR_OPENGL_ENABLE_EXTENSION_NAME))
+	if (!strncmp (props[i].extensionName,
+		      XR_KHR_OPENGL_ENABLE_EXTENSION_NAME,
+		      XR_MAX_EXTENSION_NAME_SIZE))
 	    havegl = 1;
+    free (props);
     if (!havegl)
     {
 	fprintf (stderr, "XR: the OpenXR runtime has no OpenGL support"
@@ -373,16 +403,39 @@ static int CreateSpace (void)
 static int CreateSwapchain (void)
 {
     XrSwapchainCreateInfo	info = { XR_TYPE_SWAPCHAIN_CREATE_INFO };
-    XrSwapchainImageOpenGLKHR	images[MAXIMAGES];
-    int64_t			formats[64];
+    XrSwapchainImageOpenGLKHR*	images;
+    int64_t*			formats;
     uint32_t			count;
+    uint32_t			capacity;
     uint32_t			i;
+    int				tries;
+    XrResult			r;
     XrEnvironmentBlendMode	modes[8];
 
-    count = 0;
-    if (!Check (xrEnumerateSwapchainFormats (session, 64, &count, formats),
-		"xrEnumerateSwapchainFormats"))
+    formats = NULL;
+    count = capacity = 0;
+    r = XR_ERROR_SIZE_INSUFFICIENT;
+    for (tries = 0; tries < ENUMTRIES && r == XR_ERROR_SIZE_INSUFFICIENT; tries++)
+    {
+	free (formats);
+	formats = NULL;
+	count = 0;
+	r = xrEnumerateSwapchainFormats (session, 0, &count, NULL);
+	if (XR_FAILED (r))
+	    break;
+	capacity = count;
+	formats = calloc (capacity ? capacity : 1, sizeof(*formats));
+	if (!formats)
+	    return 0;
+	r = xrEnumerateSwapchainFormats (session, capacity, &count, formats);
+    }
+    if (!Check (r, "xrEnumerateSwapchainFormats"))
+    {
+	free (formats);
 	return 0;
+    }
+    if (count > capacity)
+	count = capacity;
 
     // DOOM's palette is sRGB. An sRGB image with GL_FRAMEBUFFER_SRGB
     // left off (raylib never enables it) stores the colors as they
@@ -399,10 +452,12 @@ static int CreateSwapchain (void)
 	if (!count)
 	{
 	    fprintf (stderr, "XR: the runtime offers no swapchain formats.\n");
+	    free (formats);
 	    return 0;
 	}
 	info.format = formats[0];
     }
+    free (formats);
 
     info.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT
 		    | XR_SWAPCHAIN_USAGE_SAMPLED_BIT;
@@ -416,28 +471,50 @@ static int CreateSwapchain (void)
 		"xrCreateSwapchain"))
 	return 0;
 
-    for (i = 0; i < MAXIMAGES; i++)
-    {
-	images[i].type = XR_TYPE_SWAPCHAIN_IMAGE_OPENGL_KHR;
-	images[i].next = NULL;
-    }
-    if (!Check (xrEnumerateSwapchainImages (swapchain, MAXIMAGES, &numimages,
-					    (XrSwapchainImageBaseHeader*)images),
+    // A swapchain's images are fixed once it is made.
+    count = 0;
+    if (!Check (xrEnumerateSwapchainImages (swapchain, 0, &count, NULL),
 		"xrEnumerateSwapchainImages"))
 	return 0;
+    if (!count)
+    {
+	fprintf (stderr, "XR: the swapchain has no images.\n");
+	return 0;
+    }
+    capacity = count;
+    images = calloc (capacity, sizeof(*images));
+    fbos = calloc (capacity, sizeof(*fbos));
+    if (!images || !fbos)
+    {
+	free (images);
+	return 0;
+    }
+    for (i = 0; i < capacity; i++)
+	images[i].type = XR_TYPE_SWAPCHAIN_IMAGE_OPENGL_KHR;
+    r = xrEnumerateSwapchainImages (swapchain, capacity, &count,
+				    (XrSwapchainImageBaseHeader*)images);
+    if (!Check (r, "xrEnumerateSwapchainImages") || count != capacity)
+    {
+	free (images);
+	return 0;
+    }
+    numimages = count;
 
     for (i = 0; i < numimages; i++)
     {
 	fbos[i] = rlLoadFramebuffer ();
+	numfbos = i + 1;
 	rlFramebufferAttach (fbos[i], images[i].image,
 			     RL_ATTACHMENT_COLOR_CHANNEL0,
 			     RL_ATTACHMENT_TEXTURE2D, 0);
 	if (!rlFramebufferComplete (fbos[i]))
 	{
 	    fprintf (stderr, "XR: can not draw into the swapchain images.\n");
+	    free (images);
 	    return 0;
 	}
     }
+    free (images);
 
     // Opaque on a VR headset; take what the runtime lists first.
     count = 0;
@@ -625,10 +702,14 @@ void XR_Shutdown (void)
 {
     uint32_t	i;
 
-    for (i = 0; i < numimages; i++)
+    for (i = 0; i < numfbos; i++)
 	if (fbos[i])
 	    rlUnloadFramebuffer (fbos[i]);
+    free (fbos);
+    fbos = NULL;
+    numfbos = 0;
     numimages = 0;
+    imagestate = IMAGE_FREE;
 
     if (swapchain != XR_NULL_HANDLE)
 	xrDestroySwapchain (swapchain);
@@ -842,18 +923,63 @@ unsigned XR_Buttons (void)
 }
 
 
+//
+// WaitImage
+// Gets a swapchain image to draw into, going on from where an
+// earlier frame's failure left it.
+//
+static int WaitImage (void)
+{
+    XrSwapchainImageAcquireInfo	acquire = { XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO };
+    XrSwapchainImageWaitInfo	wait = { XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO };
+    XrResult			r;
+
+    if (imagestate == IMAGE_FREE)
+    {
+	r = xrAcquireSwapchainImage (swapchain, &acquire, &imageindex);
+	if (Lost (r) || !Check (r, "xrAcquireSwapchainImage"))
+	    return 0;
+	imagestate = IMAGE_ACQUIRED;
+    }
+    if (imagestate == IMAGE_ACQUIRED)
+    {
+	wait.timeout = XR_INFINITE_DURATION;
+	r = xrWaitSwapchainImage (swapchain, &wait);
+	if (Lost (r))
+	    return 0;
+	// XR_TIMEOUT_EXPIRED succeeds, but the image is not ready.
+	if (r != XR_SUCCESS)
+	{
+	    if (r != XR_TIMEOUT_EXPIRED)
+		Check (r, "xrWaitSwapchainImage");
+	    return 0;
+	}
+	imagestate = IMAGE_WAITED;
+    }
+    if (imageindex >= numfbos)
+    {
+	XrSwapchainImageReleaseInfo	release = { XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO };
+
+	fprintf (stderr, "XR: the runtime gave swapchain image %u of %u.\n",
+		 imageindex, numfbos);
+	r = xrReleaseSwapchainImage (swapchain, &release);
+	if (!Lost (r) && Check (r, "xrReleaseSwapchainImage"))
+	    imagestate = IMAGE_FREE;
+	return 0;
+    }
+    return 1;
+}
+
+
 void XR_Present (xr_draw_t draw)
 {
     XrFrameWaitInfo		waitinfo = { XR_TYPE_FRAME_WAIT_INFO };
     XrFrameState		frame = { XR_TYPE_FRAME_STATE };
     XrFrameBeginInfo		begininfo = { XR_TYPE_FRAME_BEGIN_INFO };
     XrFrameEndInfo		endinfo = { XR_TYPE_FRAME_END_INFO };
-    XrSwapchainImageAcquireInfo	acquire = { XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO };
-    XrSwapchainImageWaitInfo	wait = { XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO };
     XrSwapchainImageReleaseInfo	release = { XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO };
     XrCompositionLayerQuad	quad = { XR_TYPE_COMPOSITION_LAYER_QUAD };
     const XrCompositionLayerBaseHeader*	layers[1];
-    uint32_t			index;
     XrResult			r;
 
     if (!running)
@@ -871,15 +997,16 @@ void XR_Present (xr_draw_t draw)
     endinfo.layerCount = 0;
     endinfo.layers = layers;
 
-    if (frame.shouldRender
-	&& Check (xrAcquireSwapchainImage (swapchain, &acquire, &index),
-		  "xrAcquireSwapchainImage"))
+    // Only an image that was waited for is drawn and released, and
+    // only one that was released is shown; the frame is ended
+    // either way, empty if need be.
+    if (frame.shouldRender && WaitImage ())
     {
-	wait.timeout = XR_INFINITE_DURATION;
-	if (Check (xrWaitSwapchainImage (swapchain, &wait),
-		   "xrWaitSwapchainImage"))
-	    draw (fbos[index], IMAGEWIDTH, IMAGEHEIGHT);
-	xrReleaseSwapchainImage (swapchain, &release);
+	draw (fbos[imageindex], IMAGEWIDTH, IMAGEHEIGHT);
+	r = xrReleaseSwapchainImage (swapchain, &release);
+	if (Lost (r) || !Check (r, "xrReleaseSwapchainImage"))
+	    goto end;
+	imagestate = IMAGE_FREE;
 
 	// A 4:3 screen straight ahead of where the head started.
 	quad.layerFlags = 0;
@@ -900,6 +1027,7 @@ void XR_Present (xr_draw_t draw)
 	endinfo.layerCount = 1;
     }
 
+  end:
     r = xrEndFrame (session, &endinfo);
     if (!Lost (r))
 	Check (r, "xrEndFrame");

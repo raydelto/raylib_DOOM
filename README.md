@@ -233,12 +233,22 @@ with head tracking. It is still the flat 320x200 game, not a
 stereoscopic 3D renderer. `raylibdoom` and the other platforms are
 built as before. Besides raylib's dependencies it needs the OpenXR
 loader and headers (`sudo apt install libopenxr-dev`); without them
-CMake downloads and builds the loader from the OpenXR SDK.
+CMake downloads and builds the loader from the OpenXR SDK
+([OpenXR-SDK](https://github.com/KhronosGroup/OpenXR-SDK) 1.0.34 by
+the Khronos Group, mainly under the Apache License 2.0, with bundled
+parts such as jsoncpp under the licenses in its `LICENSES/`; see
+`COPYING.adoc` in `build-xr/_deps/openxr-src`). A `raylib_doom_xr`
+shipped with that loader has to carry those notices.
 
 ```sh
 cmake -B build-xr -DRAYLIB_DOOM_XR=ON
 cmake --build build-xr -j
+ctest --test-dir build-xr
 ```
+
+The `xr` test runs `i_xr.c` against a fake runtime under
+AddressSanitizer: overlong extension and swapchain image lists, and
+swapchain image waits and releases that fail.
 
 To try it without a headset, run the [Monado](https://monado.dev/)
 runtime with its simulated headset (`sudo apt install monado-service
@@ -317,7 +327,8 @@ how the frame reaches the headset.
   1.8 by Nuke.YKT, unmodified, under the LGPL 2.1 or later
   (`opl3-LICENSE.txt`).
 - `i_xr.c` / `i_xr.h`: new, the OpenXR output of `raylib_doom_xr`
-  (`-DRAYLIB_DOOM_XR=ON`), compiled into that target only.
+  (`-DRAYLIB_DOOM_XR=ON`), compiled into that target only;
+  `tests/xr_test.c` tests it.
 - `doomkeys.h`: the key codes, split out of `doomdef.h`.
 - Browser build: `web/web.cmake` and `web/shell.html` (the page, with
   the IndexedDB mount and the WAD picker); `d_main.c` splits the game
