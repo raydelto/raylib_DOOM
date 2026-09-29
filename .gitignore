@@ -1,4 +1,5 @@
 build/
 dist/
 linuxdoom-1.10/linux/
+build-xr/
 build-web/

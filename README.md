@@ -225,6 +225,86 @@ run time and starts a small `powershell.exe` helper that keeps the Windows
 pointer inside the window while you play. Set `DOOM_WSL_MOUSE=0` to turn
 that off, or `DOOM_WSL_MOUSE=1` to force it.
 
+## VR headsets (OpenXR)
+
+On Linux an opt-in second target, `raylib_doom_xr`, shows the game on
+a large virtual screen floating in front of you in an OpenXR headset,
+with head tracking. It is still the flat 320x200 game, not a
+stereoscopic 3D renderer. `raylibdoom` and the other platforms are
+built as before. Besides raylib's dependencies it needs the OpenXR
+loader and headers (`sudo apt install libopenxr-dev`); without them
+CMake downloads and builds the loader from the OpenXR SDK
+([OpenXR-SDK](https://github.com/KhronosGroup/OpenXR-SDK) 1.0.34 by
+the Khronos Group, mainly under the Apache License 2.0, with bundled
+parts such as jsoncpp under the licenses in its `LICENSES/`; see
+`COPYING.adoc` in `build-xr/_deps/openxr-src`). A `raylib_doom_xr`
+shipped with that loader has to carry those notices.
+
+```sh
+cmake -B build-xr -DRAYLIB_DOOM_XR=ON
+cmake --build build-xr -j
+ctest --test-dir build-xr
+```
+
+The `xr` test runs `i_xr.c` against a fake runtime under
+AddressSanitizer: overlong extension and swapchain image lists, and
+swapchain image waits and releases that fail.
+
+To try it without a headset, run the [Monado](https://monado.dev/)
+runtime with its simulated headset (`sudo apt install monado-service
+libopenxr1-monado`), which shows both eyes in a desktop window:
+
+```sh
+SIMULATED_ENABLE=1 XRT_COMPOSITOR_FORCE_XCB=1 monado-service
+```
+
+and in another terminal:
+
+```sh
+XR_RUNTIME_JSON=/usr/share/openxr/1/openxr_monado.json \
+  ./build-xr/raylib_doom_xr -iwad freedoom1.wad
+```
+
+`XR_RUNTIME_JSON` is only needed when no runtime is set as the active
+one, or when the one in `~/.config/openxr/1/active_runtime.json` is
+broken. `monado-service` exits at once if its standard input is not a
+terminal or pipe (`epoll_ctl(stdin) failed`); start it from a terminal,
+or as `sleep infinity | monado-service`. On a laptop with two GPUs the
+game's OpenGL and Monado's Vulkan have to be on the same one, or the
+game crashes in the OpenGL driver while creating the swapchain. Monado
+usually picks the discrete GPU, so on NVIDIA run the game with
+`__NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia`.
+
+The desktop window keeps a copy of the picture, and the keyboard and
+mouse work as usual while it has focus. Controllers (the ones OpenXR
+calls simple, Oculus Touch, Valve Index, HTC Vive and Windows Mixed
+Reality) are mapped to your key bindings:
+
+| Control                         | In the game       | In menus      |
+| ------------------------------- | ----------------- | ------------- |
+| Left stick / trackpad           | Move and strafe   | Up, down, left, right |
+| Right stick / trackpad          | Turn              | Left, right   |
+| Right trigger (simple: right select) | Fire         | Enter         |
+| Right A or grip (simple: left select) | Use         | Enter         |
+| Left trigger                    | Run               | Backspace     |
+| Right B, or right menu          | Automap           | Backspace     |
+| Left menu (Index: left B)       | Menu (Esc)        | Esc           |
+
+In a yes/no prompt, such as "are you sure you want to quit?", fire or
+use answers yes, run or automap answers no, and menu cancels. So to
+quit, press menu, pick Quit Game with fire, then press fire again.
+
+| Option          | Effect                                               |
+| --------------- | ---------------------------------------------------- |
+| `-xrflat`       | Play in the window if there is no runtime or headset, instead of exiting with an error |
+| `-noxr`         | Play in the window without trying OpenXR             |
+| `-xrdist M`     | Screen distance in meters (default 2.5)              |
+| `-xrwidth M`    | Screen width in meters (default 3.2)                 |
+
+Only OpenGL on X11 is supported (`XR_KHR_opengl_enable` with GLX), which
+is how raylib runs on Linux. See the top of `linuxdoom-1.10/i_xr.c` for
+how the frame reaches the headset.
+
 ## What changed
 
 - `i_raylib.c` / `i_raylib.h`: new, the only code that talks to raylib.
@@ -246,6 +326,9 @@ that off, or `DOOM_WSL_MOUSE=1` to force it.
 - `opl3.c` / `opl3.h`: [Nuked OPL3](https://github.com/nukeykt/Nuked-OPL3)
   1.8 by Nuke.YKT, unmodified, under the LGPL 2.1 or later
   (`opl3-LICENSE.txt`).
+- `i_xr.c` / `i_xr.h`: new, the OpenXR output of `raylib_doom_xr`
+  (`-DRAYLIB_DOOM_XR=ON`), compiled into that target only;
+  `tests/xr_test.c` tests it.
 - `doomkeys.h`: the key codes, split out of `doomdef.h`.
 - Browser build: `web/web.cmake` and `web/shell.html` (the page, with
   the IndexedDB mount and the WAD picker); `d_main.c` splits the game

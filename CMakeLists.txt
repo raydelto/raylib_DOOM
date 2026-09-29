@@ -113,3 +113,55 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang" AND NOT WIN32)
   target_link_options(umapinfo_test PRIVATE -fsanitize=address,undefined)
 endif()
 add_test(NAME umapinfo COMMAND umapinfo_test)
+
+# OpenXR headset build: cmake -B build -DRAYLIB_DOOM_XR=ON
+# Adds raylib_doom_xr next to raylibdoom, which is unchanged. The
+# game is shown on a virtual screen in the headset; see i_xr.c.
+option(RAYLIB_DOOM_XR "Also build raylib_doom_xr, for OpenXR headsets" OFF)
+if(RAYLIB_DOOM_XR)
+  if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    message(FATAL_ERROR "RAYLIB_DOOM_XR supports only Linux (OpenGL on X11)")
+  endif()
+
+  # The system loader (libopenxr-dev on Debian/Ubuntu), else the SDK's.
+  find_package(OpenXR CONFIG QUIET)
+  if(NOT OpenXR_FOUND)
+    message(STATUS "No OpenXR SDK installed, building the OpenXR loader")
+    include(FetchContent)
+    set(BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(BUILD_API_LAYERS OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+      OpenXR
+      GIT_REPOSITORY https://github.com/KhronosGroup/OpenXR-SDK.git
+      GIT_TAG release-1.0.34
+      GIT_SHALLOW TRUE)
+    FetchContent_MakeAvailable(OpenXR)
+  endif()
+  find_package(OpenGL REQUIRED COMPONENTS OpenGL GLX)
+  find_package(X11 REQUIRED)
+
+  add_executable(raylib_doom_xr ${DOOM_SOURCES} ${DOOM_DIR}/i_xr.c)
+  target_compile_definitions(raylib_doom_xr PRIVATE NORMALUNIX LINUX DOOM_XR)
+  target_link_libraries(raylib_doom_xr PRIVATE
+    raylib OpenXR::openxr_loader OpenGL::GLX X11::X11 m)
+  if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(raylib_doom_xr PRIVATE
+      -fwrapv -fno-strict-aliasing -Wall -Wno-unused-variable
+      -Wno-unused-but-set-variable -Wno-unused-const-variable
+      ${DOOM_SIGNED_CHAR})
+  endif()
+
+  # i_xr.c against a fake runtime: enumeration bounds and
+  # swapchain image failures. Needs only rlgl.h, not raylib.
+  add_executable(xr_test tests/xr_test.c)
+  target_include_directories(xr_test PRIVATE ${DOOM_DIR}
+    $<TARGET_PROPERTY:raylib,INTERFACE_INCLUDE_DIRECTORIES>)
+  target_link_libraries(xr_test PRIVATE
+    OpenXR::openxr_loader OpenGL::GLX X11::X11)
+  if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(xr_test PRIVATE
+      -fsanitize=address,undefined -fno-sanitize-recover=undefined)
+    target_link_options(xr_test PRIVATE -fsanitize=address,undefined)
+  endif()
+  add_test(NAME xr COMMAND xr_test)
+endif()
