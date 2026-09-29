@@ -1395,6 +1395,7 @@ void G_DoSaveGame (void)
     if (length > SAVEGAMESIZE) 
 	I_Error ("Savegame buffer overrun"); 
     M_WriteFile (name, savebuffer, length); 
+    I_SyncFiles ();
     free (savebuffer);
     gameaction = ga_nothing; 
     savedescription[0] = 0;		 

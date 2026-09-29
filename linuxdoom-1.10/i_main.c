@@ -31,6 +31,12 @@ rcsid[] = "$Id: i_main.c,v 1.4 1997/02/03 22:45:10 b1 Exp $";
 #include "m_argv.h"
 #include "d_main.h"
 
+#ifdef __EMSCRIPTEN__
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#endif
+
 #ifdef __APPLE__
 #include <stdio.h>
 #include <stdlib.h>
@@ -251,6 +257,16 @@ main
 
 #ifdef __APPLE__
     BundleSetup (argc, argv);
+#endif
+
+#ifdef __EMSCRIPTEN__
+    // Saved games are written to the current directory and the
+    // settings to $HOME; /save is kept in the browser's IndexedDB by
+    // the shell page. Freedoom is preloaded into /doom.
+    setenv ("HOME", "/save", 1);
+    setenv ("DOOMWADDIR", "/doom", 0);
+    if (chdir ("/save"))
+	fprintf (stderr, "No /save directory; games will not be kept\n");
 #endif
  
     D_DoomMain (); 

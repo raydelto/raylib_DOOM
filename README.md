@@ -111,6 +111,57 @@ new window, so the game can open fullscreen then. While you play the
 mouse is captured and the pointer hidden; in menus, when paused, and
 when the window loses focus, it is released.
 
+### Web browser (WebAssembly)
+
+The game also runs in a desktop browser, built with
+[Emscripten](https://emscripten.org/) and raylib's web platform. The
+page bundles Freedoom: Phase 1 (`freedoom1.wad`, BSD licensed; its
+`COPYING.txt` ships next to it), which CMake downloads and checks
+against its SHA-256 at configure time; it is not in this repository.
+
+Install the [emsdk](https://emscripten.org/docs/getting_started/downloads.html)
+outside this repository (CI uses 6.0.10), then:
+
+```sh
+source /path/to/emsdk/emsdk_env.sh
+emcmake cmake -B build-web
+cmake --build build-web -j
+```
+
+`-DPLATFORM=Web` may be given, but is implied. Add
+`-DFREEDOOM_ZIP=/path/to/freedoom-0.13.0.zip` to use a zip you already
+have instead of downloading it. `build-web/` then holds
+`raylibdoom.html`, `.js`, `.wasm`, `.data` (the WAD) and
+`freedoom-COPYING.txt`; the `web` job in `.github/workflows/build.yml`
+uploads the same files as the `raylibdoom-web` artifact.
+
+Browsers do not load the `.data` file from `file://`, so serve the
+folder over HTTP and open the page:
+
+```sh
+python3 -m http.server -d build-web 8000
+# then open http://localhost:8000/raylibdoom.html
+# or: emrun build-web/raylibdoom.html
+```
+
+Click the page to start; that click also lets the browser start the
+audio. Click again in a level to capture the mouse (Esc lets go of
+it); Alt+Enter toggles fullscreen. Saved games and settings are kept
+in the browser's IndexedDB, so they survive a reload. "Load your own
+IWAD / PWAD" stores WADs from your disk in the same place and reloads
+the page with them in the URL (`?iwad=NAME&file=NAME,NAME`); "Back to
+Freedoom" removes them. Other options go in `?args=`, for example
+`raylibdoom.html?args=-warp%201%201%20-skill%204`.
+
+In the browser the frame loop is driven by
+`emscripten_set_main_loop` (once per display refresh) instead of
+ASYNCIFY: `D_DoomLoop`'s body is `D_RunFrame`, `TryRunTics` returns
+instead of spinning until the next tic is due, and the screen wipe
+runs one step per frame. Sound effects and the OPL music go through
+the same raylib audio streams as on the desktop, over Web Audio.
+Netgames are not supported, and quitting from the menu ends the game
+until the page is reloaded.
+
 ## Running
 
 Put an IWAD (`doom1.wad`, `doom.wad`, `doom2.wad`, `plutonia.wad`,
@@ -196,6 +247,11 @@ that off, or `DOOM_WSL_MOUSE=1` to force it.
   1.8 by Nuke.YKT, unmodified, under the LGPL 2.1 or later
   (`opl3-LICENSE.txt`).
 - `doomkeys.h`: the key codes, split out of `doomdef.h`.
+- Browser build: `web/web.cmake` and `web/shell.html` (the page, with
+  the IndexedDB mount and the WAD picker); `d_main.c` splits the game
+  loop into `D_RunFrame` for `emscripten_set_main_loop`, and
+  `i_system.c` / `i_raylib.c` end the game, report errors and handle
+  the mouse the way a page needs.
 - 64-bit fixes: pointer arrays sized with `sizeof` instead of `4`,
   pointer/integer casts through `intptr_t`, the on-disk texture struct
   no longer holds a pointer, the config file's string settings, the
