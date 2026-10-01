@@ -153,6 +153,19 @@ the page with them in the URL (`?iwad=NAME&file=NAME,NAME`); "Back to
 Freedoom" removes them. Other options go in `?args=`, for example
 `raylibdoom.html?args=-warp%201%201%20-skill%204`.
 
+On a phone or tablet (a device whose main pointer is a finger, or
+once the screen is touched) the page draws touch controls over the
+side bars: a stick that moves and turns (hold STRAFE to sidestep
+with it), FIRE, USE, RUN, previous and next weapon, MENU (Esc),
+ENTER, Y for the yes/no prompts, MAP and, where the browser allows
+it, FULL for fullscreen. Several can be held at once. In menus the
+stick moves the cursor, FIRE and USE pick, RUN and MAP go back, and
+a savegame without a name is named after its slot. The mouse is not
+captured while they are shown, and a key on a real keyboard hides
+them. `?touch=1` or `?touch=0` forces them on or off. The page
+passes the buttons held to the game (`RL_WebTouch`), which turns
+them into keys the same way as the Android touch controls.
+
 In the browser the frame loop is driven by
 `emscripten_set_main_loop` (once per display refresh) instead of
 ASYNCIFY: `D_DoomLoop`'s body is `D_RunFrame`, `TryRunTics` returns

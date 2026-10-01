@@ -26,6 +26,7 @@
 static const char
 rcsid[] = "$Id: i_x.c,v 1.6 1997/02/03 22:45:10 b1 Exp $";
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
@@ -39,7 +40,7 @@ rcsid[] = "$Id: i_x.c,v 1.6 1997/02/03 22:45:10 b1 Exp $";
 #include "doomdef.h"
 
 #include "i_raylib.h"
-#if defined(DOOM_XR) || defined(__ANDROID__)
+#if defined(DOOM_XR) || defined(__ANDROID__) || defined(__EMSCRIPTEN__)
 #include "i_xr.h"
 #endif
 
@@ -52,10 +53,11 @@ rcsid[] = "$Id: i_x.c,v 1.6 1997/02/03 22:45:10 b1 Exp $";
 extern int	usemouse;
 
 
-#if defined(DOOM_XR) || defined(__ANDROID__)
+#if defined(DOOM_XR) || defined(__ANDROID__) || defined(__EMSCRIPTEN__)
 //
 // Headset controllers, and on Android the gamepad and the touch
-// controls, which report the same buttons (RL_PadButtons).
+// controls, which report the same buttons (RL_PadButtons), as do
+// the touch controls of the web page.
 // The buttons become the keys they stand for: the player's key
 // bindings in the game, the fixed menu keys while it is up.
 //
@@ -79,8 +81,120 @@ static unsigned	xrheld;
 // the menu opened or closed in between.
 static int	xrkeys[XR_NUMBUTTONS];
 
+#ifdef __EMSCRIPTEN__
+extern int	key_strafe;
+
+// m_menu.c: typing a savegame name into slot saveSlot.
+#define SAVESTRINGSIZE	24
+extern int	saveStringEnter;
+extern int	saveSlot;
+extern char	savegamestrings[10][SAVESTRINGSIZE];
+
+#define WEBBUTTONS	(XR_STRAFE|XR_WEAPPREV|XR_WEAPNEXT|XR_ENTER|XR_YES)
+
+// The key, 1 to 7, that selects each weapon.
+static const char weaponslot[NUMWEAPONS] =
+{
+    1, 2, 3, 4, 5, 6, 7, 1, 3	// ... chainsaw, super shotgun
+};
+
+//
+// WeaponKey
+// The key of the next (dir 1) or previous (-1) weapon slot that
+// holds a weapon the player has. As on the keyboard, the game
+// picks between the fist and the chainsaw, and the two shotguns.
+//
+static int WeaponKey (int dir)
+{
+    player_t*		player = &players[consoleplayer];
+    weapontype_t	current;
+    int			slot;
+    int			i;
+    int			w;
+
+    current = player->pendingweapon != wp_nochange
+	? player->pendingweapon : player->readyweapon;
+    if (current < 0 || current >= NUMWEAPONS)
+	return 0;
+
+    slot = weaponslot[current];
+    for (i = 0; i < 7; i++)
+    {
+	slot = (slot - 1 + 7 + dir) % 7 + 1;
+	for (w = 0; w < NUMWEAPONS; w++)
+	    if (weaponslot[w] == slot && player->weaponowned[w])
+		return '0' + slot;
+    }
+    return 0;
+}
+
+//
+// WebKey
+// Buttons only the web page's touch controls have, for keys a
+// phone has no other way to press.
+//
+static int WebKey (unsigned button)
+{
+    if (messageToPrint && messageNeedsInput)
+	return button == XR_YES || button == XR_ENTER ? 'y' : 0;
+
+    if (menuactive)
+    {
+	switch (button)
+	{
+	  case XR_WEAPPREV:	return KEY_LEFTARROW;
+	  case XR_WEAPNEXT:	return KEY_RIGHTARROW;
+	  case XR_ENTER:	return KEY_ENTER;
+	  case XR_YES:		return 'y';
+	}
+	return 0;
+    }
+
+    switch (button)
+    {
+      case XR_STRAFE:		return key_strafe;
+      case XR_WEAPPREV:		return WeaponKey (-1);
+      case XR_WEAPNEXT:		return WeaponKey (1);
+      case XR_ENTER:		return KEY_ENTER;
+      case XR_YES:		return 'y';
+    }
+    return 0;
+}
+
+//
+// NameSave
+// The menu saves a game only once it has a name, which a phone
+// can not type. Enter on an empty name names it after the slot.
+//
+static void NameSave (void)
+{
+    event_t	event;
+    char	name[16];
+    char*	c;
+
+    if (!saveStringEnter || savegamestrings[saveSlot][0])
+	return;
+
+    sprintf (name, "SLOT %d", saveSlot + 1);
+    event.data2 = event.data3 = 0;
+    for (c = name; *c; c++)
+    {
+	event.type = ev_keydown;
+	event.data1 = *c;
+	D_PostEvent (&event);
+	event.type = ev_keyup;
+	D_PostEvent (&event);
+    }
+}
+#endif
+
 static int XRKey (unsigned button)
 {
+#ifdef __EMSCRIPTEN__
+    if (button & WEBBUTTONS)
+	return WebKey (button);
+#endif
+
     // Yes/no prompts (quit, end game, overwrite a save, nightmare)
     // ignore Enter and Backspace, so answer them directly.
     if (messageToPrint && messageNeedsInput)
@@ -143,7 +257,7 @@ static void I_PostXRButtons (void)
 #ifdef DOOM_XR
     now |= XR_Buttons ();
 #endif
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(__EMSCRIPTEN__)
     now |= RL_PadButtons ();
 #endif
     for (i = 0; i < XR_NUMBUTTONS; i++)
@@ -162,6 +276,10 @@ static void I_PostXRButtons (void)
 
 	event.data1 = xrkeys[i];
 	event.data2 = event.data3 = 0;
+#ifdef __EMSCRIPTEN__
+	if (event.type == ev_keydown && event.data1 == KEY_ENTER)
+	    NameSave ();
+#endif
 	if (event.data1)
 	    D_PostEvent (&event);
     }
@@ -297,7 +415,7 @@ void I_StartTic (void)
     if (!XR_Update ())
 	I_Quit ();
 #endif
-#if defined(DOOM_XR) || defined(__ANDROID__)
+#if defined(DOOM_XR) || defined(__ANDROID__) || defined(__EMSCRIPTEN__)
     I_PostXRButtons ();
 #endif
 
