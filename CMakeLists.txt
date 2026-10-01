@@ -150,6 +150,19 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang" AND NOT WIN32)
 endif()
 add_test(NAME umapinfo COMMAND umapinfo_test)
 
+add_executable(texture_init_test tests/texture_init_test.c ${DOOM_DIR}/r_data.c)
+target_include_directories(texture_init_test PRIVATE ${DOOM_DIR})
+target_compile_definitions(texture_init_test PRIVATE NORMALUNIX LINUX)
+target_compile_options(texture_init_test PRIVATE ${DOOM_SIGNED_CHAR})
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang" AND NOT WIN32)
+  # TEXTURE1 entries are only 2-byte aligned in real WADs too.
+  target_compile_options(texture_init_test PRIVATE -fwrapv -fno-strict-aliasing
+    -fsanitize=address,undefined -fno-sanitize=alignment
+    -fno-sanitize-recover=undefined)
+  target_link_options(texture_init_test PRIVATE -fsanitize=address,undefined)
+endif()
+add_test(NAME texture_init COMMAND texture_init_test)
+
 # OpenXR headset build: cmake -B build -DRAYLIB_DOOM_XR=ON
 # Adds raylib_doom_xr next to raylibdoom, which is unchanged. The
 # game is shown on a virtual screen in the headset; see i_xr.c.

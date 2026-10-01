@@ -248,6 +248,7 @@ void R_GenerateComposite (int texnum)
     block = Z_Malloc (texturecompositesize[texnum],
 		      PU_STATIC, 
 		      &texturecomposite[texnum]);	
+    memset (block, 0, texturecompositesize[texnum]);
 
     collump = texturecolumnlump[texnum];
     colofs = texturecolumnofs[texnum];
@@ -309,6 +310,7 @@ void R_GenerateLookup (int texnum)
     int			i;
     short*		collump;
     unsigned short*	colofs;
+    boolean		reported = false;
 	
     texture = textures[texnum];
 
@@ -352,15 +354,17 @@ void R_GenerateLookup (int texnum)
 	
     for (x=0 ; x<texture->width ; x++)
     {
-	if (!patchcount[x])
+	// A column no patch covers (its patch is missing, see
+	// R_InitTextures) is left blank in the composite, rather
+	// than with no lump to draw from.
+	if (!patchcount[x] && !reported)
 	{
-	    printf ("R_GenerateLookup: column without a patch (%s)\n",
+	    printf ("R_GenerateLookup: column without a patch (%.8s)\n",
 		    texture->name);
-	    return;
+	    reported = true;
 	}
-	// I_Error ("R_GenerateLookup: column without a patch");
 	
-	if (patchcount[x] > 1)
+	if (patchcount[x] != 1)
 	{
 	    // Use the cached block.
 	    collump[x] = -1;	
@@ -421,6 +425,7 @@ void R_InitTextures (void)
 
     int			i;
     int			j;
+    int			k;
 
     int*		maptex;
     int*		maptex2;
@@ -538,16 +543,23 @@ void R_InitTextures (void)
 	mpatch = &mtexture->patches[0];
 	patch = &texture->patches[0];
 
-	for (j=0 ; j<texture->patchcount ; j++, mpatch++, patch++)
+	// A patch the WADs lack is skipped, not fatal: SIGIL
+	// replaces TEXTURE2 with The Ultimate DOOM's, whose SKY4
+	// needs a patch that DOOM 1.9 (no Episode 4) does not have.
+	for (j=0 ; j<SHORT(mtexture->patchcount) ; j++, mpatch++)
 	{
+	    k = SHORT(mpatch->patch);
+	    if (k < 0 || k >= nummappatches || patchlookup[k] == -1)
+	    {
+		printf ("R_InitTextures: Missing patch in texture %.8s\n",
+			texture->name);
+		texture->patchcount--;
+		continue;
+	    }
 	    patch->originx = SHORT(mpatch->originx);
 	    patch->originy = SHORT(mpatch->originy);
-	    patch->patch = patchlookup[SHORT(mpatch->patch)];
-	    if (patch->patch == -1)
-	    {
-		I_Error ("R_InitTextures: Missing patch in texture %s",
-			 texture->name);
-	    }
+	    patch->patch = patchlookup[k];
+	    patch++;
 	}		
 	texturecolumnlump[i] = Z_Malloc (texture->width*2, PU_STATIC,0);
 	texturecolumnofs[i] = Z_Malloc (texture->width*2, PU_STATIC,0);
