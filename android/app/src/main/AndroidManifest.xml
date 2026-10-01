@@ -3,7 +3,9 @@
      and starts NativeActivity, which loads libraylibdoom.so (raylib's
      android_main, then DOOM's main) in a process of its own, so the
      game's exit() ends only the game. The xr flavor adds OpenXR's
-     entries in src/xr/AndroidManifest.xml. -->
+     entries in src/xr/AndroidManifest.xml. WadActivity handles its
+     configuration changes itself, so a rotation does not restart it
+     while it is copying WADs in the background. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
@@ -19,6 +21,7 @@
         <activity
             android:name=".WadActivity"
             android:exported="true"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density"
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

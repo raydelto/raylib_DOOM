@@ -157,4 +157,6 @@ androidComponents {
 dependencies {
     // The Khronos OpenXR loader, as a prefab package for CMake.
     xrImplementation 'org.khronos.openxr:openxr_loader_for_android:1.1.52'
+    // WadFilesTest, on the JVM: ./gradlew testFlatDebugUnitTest
+    testImplementation 'junit:junit:4.13.2'
 }

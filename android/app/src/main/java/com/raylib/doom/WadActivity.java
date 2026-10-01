@@ -50,6 +50,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 
 public class WadActivity extends Activity {
@@ -116,7 +117,7 @@ public class WadActivity extends Activity {
             for (File f : files) {
                 String name = f.getName();
                 if (!f.isFile() || name.endsWith(".part")
-                        || !name.toLowerCase().endsWith(".wad"))
+                        || !name.toLowerCase(Locale.ROOT).endsWith(".wad"))
                     continue;
                 try {
                     Wad w = Wad.read(f);
@@ -235,6 +236,14 @@ public class WadActivity extends Activity {
                     c.setText(label(w));
                     c.setChecked(chosen.contains(w.file.getPath()));
                     c.setOnCheckedChangeListener((v, on) -> {
+                        if (on && !chosen.contains(w.file.getPath())
+                                && chosen.size() >= WadFiles.MAX_PWADS) {
+                            v.setChecked(false);
+                            message("At most " + WadFiles.MAX_PWADS + " add-ons "
+                                    + "(PWADs) can be loaded at once. Untick one "
+                                    + "to add another.");
+                            return;
+                        }
                         if (on)
                             chosen.add(w.file.getPath());
                         else
@@ -310,6 +319,11 @@ public class WadActivity extends Activity {
     private void play() {
         if (iwad == null || !new File(iwad).canRead()) {
             message("Choose the game data (an IWAD) first.");
+            return;
+        }
+        String tooMany = WadFiles.checkPwadCount(chosen.size());
+        if (tooMany != null) {
+            message(tooMany);
             return;
         }
         List<String> args = new ArrayList<>();
@@ -404,6 +418,8 @@ public class WadActivity extends Activity {
             for (Uri uri : uris)
                 importWad(uri, report, added);
             runOnUiThread(() -> {
+                if (isDestroyed())
+                    return;
                 busy = false;
                 wait.dismiss();
                 imported(report, added);
@@ -414,12 +430,10 @@ public class WadActivity extends Activity {
     private void importWad(Uri uri, List<String> report, List<Wad> added) {
         String name = displayName(uri);
         // Imported files keep their name, as the game would see it on
-        // the desktop, made safe for a path.
-        String safe = name.replaceAll("[^A-Za-z0-9._-]", "_");
-        if (!safe.toLowerCase().endsWith(".wad"))
-            safe += ".wad";
-        File dest = new File(importDir(), safe);
-        File part = new File(dest.getPath() + ".part");
+        // the desktop, made safe for a path. Two different files with
+        // the same name both stay (see WadFiles.place).
+        File dir = importDir();
+        File part = new File(dir, "import.part");
         try {
             try (InputStream in = getContentResolver().openInputStream(uri);
                  OutputStream out = new FileOutputStream(part)) {
@@ -431,10 +445,14 @@ public class WadActivity extends Activity {
                     out.write(buf, 0, n);
             }
             Wad w = Wad.read(part);
-            if (!part.renameTo(dest))
-                throw new IOException("could not be saved");
-            added.add(Wad.read(dest));
-            report.add(name + ": added, " + w.describe());
+            String safe = WadFiles.safeName(name);
+            WadFiles.Placed p = WadFiles.place(part, dir, safe);
+            added.add(Wad.read(p.file));
+            String as = p.file.getName().equals(name) ? ""
+                        : " as " + p.file.getName();
+            report.add(name + (p.existing ? ": already added" + as + ", "
+                                          : ": added" + as + ", ")
+                       + w.describe());
         } catch (Wad.BadWadException e) {
             report.add(name + ": not added, it is " + e.getMessage() + ".");
         } catch (IOException | SecurityException e) {
@@ -463,8 +481,14 @@ public class WadActivity extends Activity {
                 if (!anyIwad)
                     iwad = w.file.getPath();
                 anyIwad = true;
-            } else {
+            } else if (chosen.contains(w.file.getPath())) {
+                // Already ticked.
+            } else if (chosen.size() < WadFiles.MAX_PWADS) {
                 chosen.add(w.file.getPath());
+            } else {
+                report.add("\n" + w.file.getName() + " was added but not ticked: "
+                           + "at most " + WadFiles.MAX_PWADS + " add-ons (PWADs) "
+                           + "can be loaded at once.");
             }
         }
         save();

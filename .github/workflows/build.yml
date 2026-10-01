@@ -88,7 +88,7 @@ jobs:
       # signed one is made by release-android.yml on a tag).
       - name: Build
         working-directory: android
-        run: ./gradlew --no-daemon assembleFlatDebug assembleXrDebug assembleFlatRelease
+        run: ./gradlew --no-daemon assembleFlatDebug assembleXrDebug assembleFlatRelease testFlatDebugUnitTest
 
       # No WAD, of any kind or name, may be in an APK.
       - name: Check for game data
