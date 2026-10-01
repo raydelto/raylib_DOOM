@@ -1,0 +1,180 @@
+name: release-android
+
+# A v* tag builds the signed Android APK (the flat flavor, arm64-v8a and
+# x86_64 in one APK) and uploads raylibdoom-<version>-android-flat.apk
+# and its .sha256 to the draft GitHub Release for the tag.
+# workflow_dispatch, and pull requests that change the Android build,
+# build the same release variant unsigned and keep it as an Actions
+# artifact only. Every run checks that the APK holds no WAD.
+#
+# Signing needs four repository secrets (see "Android" in README.md):
+#   ANDROID_KEYSTORE_BASE64   the release keystore, base64-encoded
+#   ANDROID_KEYSTORE_PASSWORD its password
+#   ANDROID_KEY_ALIAS         the key's alias
+#   ANDROID_KEY_PASSWORD      the key's password
+# Without them a tag build fails: it never uploads an unsigned or
+# debug-signed APK.
+
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    paths:
+      - '.github/workflows/release-android.yml'
+      - 'android/**'
+      - 'packaging/android/**'
+      - 'linuxdoom-1.10/i_android.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'APK version, MAJOR.MINOR.PATCH (default: 0.0.0)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version
+        id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then
+            version=${GITHUB_REF_NAME#v}
+          elif [ -n "${INPUT_VERSION}" ]; then
+            version=${INPUT_VERSION#v}
+          else
+            version=0.0.0
+          fi
+          # versionCode is made from the first three numbers (see
+          # android/app/build.gradle); a suffix such as -rc1 is kept in
+          # versionName only.
+          if ! printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-+.~][A-Za-z0-9.+~-]*)?$'; then
+            echo "not a MAJOR.MINOR.PATCH version: $version" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Version: $version"
+
+      - name: Test the no-WAD check
+        run: sh packaging/android/test-check-no-wad.sh
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Install the NDK and CMake
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "ndk;28.1.13356709" "cmake;3.22.1" > /dev/null
+
+      # Only a tag push signs. The keystore is written outside the
+      # checkout and removed at the end of the job.
+      - name: Release keystore
+        id: keystore
+        if: github.event_name == 'push' && github.ref_type == 'tag'
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          missing=
+          for s in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD \
+                   ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            eval "[ -n \"\${$s}\" ]" || missing="$missing $s"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::The Android release signing secrets are missing:$missing." \
+                 "Add them under Settings > Secrets and variables > Actions" \
+                 "(see \"Android\" in README.md). Not releasing an unsigned APK."
+            exit 1
+          fi
+          ks="$RUNNER_TEMP/release.jks"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$ks"
+          echo "path=$ks" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        working-directory: android
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          KEYSTORE: ${{ steps.keystore.outputs.path }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -- -PappVersion="$VERSION"
+          [ -z "$KEYSTORE" ] || set -- "$@" -PreleaseKeystore="$KEYSTORE"
+          ./gradlew --no-daemon assembleFlatRelease "$@"
+
+      - name: Package
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          SIGNED: ${{ steps.keystore.outputs.path != '' }}
+        run: |
+          out=android/app/build/outputs/apk/flat/release
+          mkdir dist
+          if [ "$SIGNED" = true ]; then
+            apk=dist/raylibdoom-$VERSION-android-flat.apk
+            cp "$out/app-flat-release.apk" "$apk"
+            apksigner=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)/apksigner
+            "$apksigner" verify --print-certs "$apk" | tee certs.txt
+            if grep -q 'CN=Android Debug' certs.txt; then
+              echo "::error::$apk is signed with a debug key" >&2
+              exit 1
+            fi
+          else
+            apk=dist/raylibdoom-$VERSION-android-flat-unsigned.apk
+            cp "$out/app-flat-release-unsigned.apk" "$apk"
+          fi
+          sh packaging/android/check-no-wad.sh "$apk"
+          (cd dist && sha256sum "$(basename "$apk")" > "$(basename "$apk").sha256" &&
+             cat ./*.sha256)
+
+      - name: Remove the keystore
+        if: always() && steps.keystore.outputs.path != ''
+        run: rm -f "${{ steps.keystore.outputs.path }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: raylibdoom-${{ steps.version.outputs.version }}-android
+          path: dist/
+          if-no-files-found: error
+
+  # Only a tag push releases; upload-release.sh checks this again.
+  release:
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: apk
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: raylibdoom-${{ needs.apk.outputs.version }}-android
+          path: dist
+
+      - name: Check
+        working-directory: dist
+        run: |
+          sha256sum -c ./*.sha256
+          sh ../packaging/android/check-no-wad.sh ./*.apk
+          ls ./*.apk | grep -q -- '-android-flat\.apk$'
+
+      - name: Upload to the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: sh packaging/android/upload-release.sh dist

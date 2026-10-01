@@ -83,12 +83,18 @@ jobs:
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
             "ndk;28.1.13356709" "cmake;3.22.1" > /dev/null
 
-      # Downloads Freedoom 0.13.0 (checked against its SHA-256) and
-      # builds raylib 5.5 for Android, then both flavors for
-      # arm64-v8a and x86_64.
+      # Builds raylib 5.5 for Android, then both flavors for
+      # arm64-v8a and x86_64, and the release variant (unsigned: the
+      # signed one is made by release-android.yml on a tag).
       - name: Build
         working-directory: android
-        run: ./gradlew --no-daemon assembleFlatDebug assembleXrDebug
+        run: ./gradlew --no-daemon assembleFlatDebug assembleXrDebug assembleFlatRelease testFlatDebugUnitTest
+
+      # No WAD, of any kind or name, may be in an APK.
+      - name: Check for game data
+        run: |
+          sh packaging/android/test-check-no-wad.sh
+          sh packaging/android/check-no-wad.sh android/app/build/outputs/apk/*/*/*.apk
 
       - uses: actions/upload-artifact@v4
         with:

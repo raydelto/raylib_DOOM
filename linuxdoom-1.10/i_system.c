@@ -49,6 +49,10 @@ rcsid[] = "$Id: m_bbox.c,v 1.1 1997/02/03 22:45:10 b1 Exp $";
 #include "i_system.h"
 #include "i_win32.h"
 
+#ifdef __ANDROID__
+#include "i_android.h"
+#endif
+
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
 #endif
@@ -219,6 +223,17 @@ void I_Error (char *error, ...)
 	vsnprintf (message, sizeof(message), error, argptr);
 	va_end (argptr);
 	I_Win32ErrorBox (message);
+    }
+#endif
+
+#ifdef __ANDROID__
+    {
+	char	message[512];
+
+	va_start (argptr,error);
+	vsnprintf (message, sizeof(message), error, argptr);
+	va_end (argptr);
+	I_AndroidError (message);
     }
 #endif
 

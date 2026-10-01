@@ -1,0 +1,186 @@
+raylib 1.10 Engine for Android: third-party notices
+===================================================
+
+No game data (IWAD or PWAD) is included: the player supplies their
+own WAD files. The app is compatible with DOOM WAD files; it is not
+made or endorsed by id Software, Bethesda or ZeniMax.
+
+The program (libraylibdoom.so) links raylib 5.5 statically, with the
+single-file libraries bundled in it, and the Android NDK's
+native_app_glue. These are covered by the entries below. Where a
+library offers a choice of licenses, the one used here is named
+first. On Android raylib uses only system libraries (EGL, OpenGL ES,
+AAudio through miniaudio); none of them is redistributed. The source
+code of each release is at
+https://github.com/raydelto/raylib_DOOM/tree/<tag>.
+
+Files: *
+Copyright: 1993-1996 id Software, Inc.
+           2026 raylib DOOM contributors
+License: GPL-2
+Comment:
+ id Software released the DOOM source under the GNU GPL in 1999
+ (COPYING-GPL-2.0.txt); the older "DOOM Source Code License" file headers are
+ superseded by it.
+
+Files: linuxdoom-1.10/opl3.c
+       linuxdoom-1.10/opl3.h
+Copyright: 2013-2020 Nuke.YKT
+License: LGPL-2.1+
+
+Files: android_native_app_glue.c (Android NDK)
+Copyright: 2010 The Android Open Source Project
+License: Apache-2.0
+
+Files: openxr_loader_for_android (the xr flavor only)
+Copyright: The Khronos Group Inc. and contributors
+License: Apache-2.0
+
+Files: raylib/*
+Copyright: 2013-2024 Ramon Santamaria (@raysan5)
+License: Zlib
+
+Files: raylib/src/external/rl_gputex.h
+       raylib/src/external/rprand.h
+Copyright: 2013-2023 Ramon Santamaria (@raysan5)
+License: Zlib
+
+Files: raylib/src/external/qoi.h
+Copyright: 2021 Dominic Szablewski
+License: Expat
+
+Files: raylib/src/external/qoa.h
+Copyright: 2023 Dominic Szablewski
+License: Expat
+
+Files: raylib/src/external/miniaudio.h
+       raylib/src/external/dr_wav.h
+       raylib/src/external/dr_mp3.h
+       raylib/src/external/dr_flac.h
+Copyright: 2023 David Reid
+License: public-domain or MIT-0
+ These files are available as a choice of public domain (Unlicense) or
+ MIT No Attribution.
+
+Files: raylib/src/external/stb_*
+Copyright: Sean Barrett and contributors
+License: public-domain or Expat
+ These files are available as a choice of public domain (Unlicense) or
+ the MIT license.
+
+Files: raylib/src/external/msf_gif.h
+Copyright: 2021 Miles Fogle
+License: public-domain or Expat
+
+Files: raylib/src/external/sdefl.h
+       raylib/src/external/sinfl.h
+Copyright: 2020-2023 Micha Mettke
+License: public-domain or Expat
+
+Files: raylib/src/external/jar_xm.h
+       raylib/src/external/jar_mod.h
+Copyright: Romain Dalmaso, Jean-François Del Nero, Joshua Reisenauer
+License: WTFPL-2
+ These files are available under the Do What The Fuck You Want To
+ Public License, Version 2, as published by Sam Hocevar.
+
+License: GPL-2
+ This program is free software; you can redistribute it and/or modify
+ it under the terms of the GNU General Public License version 2 as
+ published by the Free Software Foundation.
+ .
+ This program is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ GNU General Public License for more details.
+ .
+ The complete text is included with the program as COPYING-GPL-2.0.txt.
+
+License: LGPL-2.1+
+ Nuked OPL3 is free software: you can redistribute it and/or modify
+ it under the terms of the GNU Lesser General Public License as
+ published by the Free Software Foundation, either version 2.1
+ of the License, or (at your option) any later version.
+ .
+ Nuked OPL3 is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ GNU Lesser General Public License for more details.
+ .
+ The complete text is included with the program as
+ Nuked-OPL3-LGPL-2.1.txt.
+
+License: Apache-2.0
+ Licensed under the Apache License, Version 2.0 (the "License"); you
+ may not use these files except in compliance with the License. You
+ may obtain a copy of the License at
+ http://www.apache.org/licenses/LICENSE-2.0
+ .
+ Unless required by applicable law or agreed to in writing, software
+ distributed under the License is distributed on an "AS IS" BASIS,
+ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+ implied. See the License for the specific language governing
+ permissions and limitations under the License.
+ .
+ The complete text is included with the program as Apache-2.0.txt.
+
+License: Zlib
+ This software is provided 'as-is', without any express or implied
+ warranty. In no event will the authors be held liable for any damages
+ arising from the use of this software.
+ .
+ Permission is granted to anyone to use this software for any purpose,
+ including commercial applications, and to alter it and redistribute it
+ freely, subject to the following restrictions:
+ .
+ 1. The origin of this software must not be misrepresented; you must not
+    claim that you wrote the original software. If you use this software
+    in a product, an acknowledgment in the product documentation would
+    be appreciated but is not required.
+ .
+ 2. Altered source versions must be plainly marked as such, and must not
+    be misrepresented as being the original software.
+ .
+ 3. This notice may not be removed or altered from any source
+    distribution.
+
+License: Expat
+ Permission is hereby granted, free of charge, to any person obtaining a
+ copy of this software and associated documentation files (the
+ "Software"), to deal in the Software without restriction, including
+ without limitation the rights to use, copy, modify, merge, publish,
+ distribute, sublicense, and/or sell copies of the Software, and to
+ permit persons to whom the Software is furnished to do so, subject to
+ the following conditions:
+ .
+ The above copyright notice and this permission notice shall be included
+ in all copies or substantial portions of the Software.
+ .
+ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+ OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+ IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+ TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+License: public-domain
+ This is free and unencumbered software released into the public domain.
+ Anyone is free to copy, modify, publish, use, compile, sell, or
+ distribute this software, either in source code form or as a compiled
+ binary, for any purpose, commercial or non-commercial, and by any means.
+
+License: MIT-0
+ Permission is hereby granted, free of charge, to any person obtaining a
+ copy of this software and associated documentation files (the
+ "Software"), to deal in the Software without restriction, including
+ without limitation the rights to use, copy, modify, merge, publish,
+ distribute, sublicense, and/or sell copies of the Software, and to
+ permit persons to whom the Software is furnished to do so.
+
+License: WTFPL-2
+ Everyone is permitted to copy and distribute verbatim or modified
+ copies of this license document, and changing it is allowed as long
+ as the name is changed. DO WHAT THE FUCK YOU WANT TO PUBLIC LICENSE
+ TERMS AND CONDITIONS FOR COPYING, DISTRIBUTION AND MODIFICATION:
+ 0. You just DO WHAT THE FUCK YOU WANT TO.

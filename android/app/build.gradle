@@ -1,81 +1,71 @@
 // The APK: ../../CMakeLists.txt built with the NDK as
 // libraylibdoom.so (-DRAYLIB_DOOM_ANDROID=ON), run by NativeActivity,
-// with Freedoom: Phase 1 in its assets.
+// started by the Java launcher (WadActivity), which finds the
+// player's own WADs. No game data goes into the APK.
 //
 //   flat: a normal Android app (phones, tablets, Android XR panel)
 //   xr:   the same, plus OpenXR (Android XR Full Space)
 //
 // ./gradlew assembleFlatDebug assembleXrDebug
-
-import java.security.MessageDigest
-import java.util.zip.ZipFile
+// ./gradlew assembleFlatRelease -PappVersion=1.2.3
+//
+// A release build is signed only when -PreleaseKeystore=FILE is given,
+// with the passwords and alias in the environment (ANDROID_KEYSTORE_
+// PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD), as
+// .github/workflows/release-android.yml does; otherwise it is left
+// unsigned (app-<flavor>-release-unsigned.apk).
 
 plugins {
     id 'com.android.application'
 }
 
-// Freedoom is BSD licensed and may be bundled. As in web/web.cmake,
-// it is downloaded and checked here rather than kept in the
-// repository; -PfreedoomZip=/path/to/freedoom-0.13.0.zip uses a zip
-// you already have.
-def freedoomVersion = '0.13.0'
-def freedoomSha256 = '3f9b264f3e3ce503b4fb7f6bdcb1f419d93c7b546f4df3e874dd878db9688f59'
+// The version, from the tag (v1.2.3 -> -PappVersion=1.2.3). versionCode
+// is major*1000000 + minor*1000 + patch, so every release installs over
+// the one before; anything after the patch number (1.2.3-rc1) is
+// left out of it.
+def appVersion = providers.gradleProperty('appVersion').getOrElse('0.0.0-dev')
+def versionParts = (appVersion =~ /^(\d+)\.(\d+)\.(\d+)/)
+if (!versionParts.find())
+    throw new GradleException("appVersion ${appVersion} is not MAJOR.MINOR.PATCH")
+def appVersionCode = Math.max(1, versionParts.group(1).toInteger() * 1000000
+                                 + versionParts.group(2).toInteger() * 1000
+                                 + versionParts.group(3).toInteger())
+// The source of exactly this build, for the About screen (GPL-2.0).
+def sourceUrl = providers.gradleProperty('appVersion').isPresent()
+    ? "https://github.com/raydelto/raylib_DOOM/tree/v${appVersion}"
+    : 'https://github.com/raydelto/raylib_DOOM'
 
-abstract class FreedoomAssets extends DefaultTask {
-    @Input abstract Property<String> getVersion()
-    @Input abstract Property<String> getSha256()
-    @Input @Optional abstract Property<String> getZipPath()
-    @Internal abstract DirectoryProperty getCacheDir()
+def releaseKeystore = providers.gradleProperty('releaseKeystore')
+
+// The licenses, shown by About / Licenses in the launcher: assets/
+// licenses/<name> for each file.
+abstract class LicenseAssets extends DefaultTask {
+    @Input abstract MapProperty<String, String> getNames()
+    @InputFiles abstract ConfigurableFileCollection getSources()
     @OutputDirectory abstract DirectoryProperty getOutputDir()
 
     @TaskAction
-    void unpack() {
-        String v = version.get()
-        File zip = zipPath.isPresent()
-            ? new File(zipPath.get())
-            : new File(cacheDir.get().asFile, "freedoom-${v}.zip")
-        if (!zip.exists()) {
-            zip.parentFile.mkdirs()
-            File part = new File(zip.path + '.part')
-            def url = "https://github.com/freedoom/freedoom/releases/download/v${v}/freedoom-${v}.zip"
-            logger.lifecycle("Downloading ${url}")
-            new URL(url).withInputStream { input -> part.withOutputStream { it << input } }
-            part.renameTo(zip)
-        }
-
-        def md = MessageDigest.getInstance('SHA-256')
-        zip.withInputStream { input ->
-            byte[] buf = new byte[65536]
-            int n
-            while ((n = input.read(buf)) > 0)
-                md.update(buf, 0, n)
-        }
-        String hash = md.digest().encodeHex().toString()
-        if (hash != sha256.get())
-            throw new GradleException("${zip} is not freedoom-${v}.zip (SHA-256 ${hash})")
-
-        // The names i_android.c copies out of the APK.
-        def names = ["freedoom-${v}/freedoom1.wad": 'freedoom1.wad',
-                     "freedoom-${v}/COPYING.txt": 'freedoom-COPYING.txt']
-        File out = outputDir.get().asFile
+    void copy() {
+        File out = new File(outputDir.get().asFile, 'licenses')
+        out.deleteDir()
         out.mkdirs()
-        new ZipFile(zip).withCloseable { z ->
-            names.each { entry, name ->
-                def e = z.getEntry(entry)
-                if (e == null)
-                    throw new GradleException("${zip} has no ${entry}")
-                new File(out, name).withOutputStream { it << z.getInputStream(e) }
-            }
+        names.get().each { from, name ->
+            new File(out, name).bytes = new File(from).bytes
         }
     }
 }
 
-def freedoom = tasks.register('freedoomAssets', FreedoomAssets) {
-    version = freedoomVersion
-    sha256 = freedoomSha256
-    zipPath = providers.gradleProperty('freedoomZip')
-    cacheDir = layout.buildDirectory.dir('freedoom')
-    outputDir = layout.buildDirectory.dir('generated/freedoom')
+def licenseFiles = [
+    '../LICENSE.TXT': 'COPYING-GPL-2.0.txt',
+    '../linuxdoom-1.10/opl3-LICENSE.txt': 'Nuked-OPL3-LGPL-2.1.txt',
+    '../packaging/android/THIRD-PARTY-NOTICES.txt': 'THIRD-PARTY-NOTICES.txt',
+    '../packaging/android/Apache-2.0.txt': 'Apache-2.0.txt',
+].collectEntries { k, v -> [rootProject.file(k).path, v] }
+
+def licenses = tasks.register('licenseAssets', LicenseAssets) {
+    names = licenseFiles
+    sources.from(licenseFiles.keySet())
+    outputDir = layout.buildDirectory.dir('generated/licenses')
 }
 
 android {
@@ -88,8 +78,9 @@ android {
         // AAudio for raylib's miniaudio; the OpenXR loader wants 24.
         minSdk 26
         targetSdk 34
-        versionCode 1
-        versionName '1.10'
+        versionCode appVersionCode
+        versionName appVersion
+        buildConfigField 'String', 'SOURCE_URL', "\"${sourceUrl}\""
 
         ndk {
             // Devices, and the x86_64 emulator.
@@ -119,16 +110,26 @@ android {
         }
     }
 
+    signingConfigs {
+        if (releaseKeystore.isPresent()) {
+            release {
+                storeFile file(releaseKeystore.get())
+                storePassword System.getenv('ANDROID_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('ANDROID_KEY_ALIAS')
+                keyPassword System.getenv('ANDROID_KEY_PASSWORD')
+            }
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled false
-            // Signed with the debug key so it installs as it is;
-            // sign it with your own key to publish it.
-            signingConfig signingConfigs.debug
+            signingConfig releaseKeystore.isPresent() ? signingConfigs.release : null
         }
     }
 
     buildFeatures {
+        buildConfig true
         prefab true
     }
 
@@ -149,11 +150,13 @@ android {
 
 androidComponents {
     onVariants(selector().all()) { variant ->
-        variant.sources.assets.addGeneratedSourceDirectory(freedoom) { it.outputDir }
+        variant.sources.assets.addGeneratedSourceDirectory(licenses) { it.outputDir }
     }
 }
 
 dependencies {
     // The Khronos OpenXR loader, as a prefab package for CMake.
     xrImplementation 'org.khronos.openxr:openxr_loader_for_android:1.1.52'
+    // WadFilesTest, on the JVM: ./gradlew testFlatDebugUnitTest
+    testImplementation 'junit:junit:4.13.2'
 }

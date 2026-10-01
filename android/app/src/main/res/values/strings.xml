@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- No id Software or Bethesda trademark in the name: the app only
+     says what WAD files it plays. -->
 <resources>
-    <string name="app_name">raylib DOOM</string>
+    <string name="app_name">raylib 1.10 Engine</string>
+    <string name="tagline">Compatible with DOOM WAD files. No game data is included.</string>
 </resources>

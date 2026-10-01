@@ -629,6 +629,14 @@ void D_AddFile (char *file)
     for (numwadfiles = 0 ; wadfiles[numwadfiles] ; numwadfiles++)
 	;
 
+#ifdef __ANDROID__
+    // The launcher (WadActivity) limits the add-ons it passes; this
+    // keeps wadfiles' NULL terminator if it ever gets that wrong.
+    if (numwadfiles >= MAXWADFILES - 1)
+	I_Error ("Too many WAD files: at most %d can be loaded at once",
+		 MAXWADFILES - 1);
+#endif
+
     newfile = malloc (strlen(file)+1);
     strcpy (newfile, file);
 	
