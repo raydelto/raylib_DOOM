@@ -21,12 +21,16 @@
 #define __I_ANDROID__
 
 // Called first thing in main. Sends stdout and stderr to logcat,
-// copies the bundled IWAD out of the APK into the app's internal
-// storage, and makes that directory $HOME, $DOOMWADDIR and the
-// current directory, so the IWAD, the settings (.doomrc) and the
-// saved games are all kept there. Words in args.txt in that
-// directory are added to the command line.
+// and makes the app's internal storage $HOME, $DOOMWADDIR and the
+// current directory, so the settings (.doomrc) and the saved games
+// are kept there. The launcher's launch.txt in that directory (one
+// argument per line: the IWAD and PWADs the player chose), then the
+// words in args.txt, become the command line.
 void I_AndroidSetup (void);
+
+// Called by I_Error: leaves the message in error.txt for the
+// launcher to show once the game's process has exited.
+void I_AndroidError (const char* message);
 
 // False on devices without a touchscreen (Android XR glasses and
 // headsets, TVs), which start with the touch controls hidden.

@@ -20,7 +20,11 @@
                 android:name="android.window.PROPERTY_XR_ACTIVITY_START_MODE"
                 android:value="XR_ACTIVITY_START_MODE_FULL_SPACE_UNMANAGED"
                 tools:replace="android:value" />
+        </activity>
 
+        <!-- The launcher (a 2D panel) starts the game, which then
+             goes to Full Space. -->
+        <activity android:name=".WadActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

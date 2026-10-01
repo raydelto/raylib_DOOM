@@ -13,14 +13,14 @@
 // for more details.
 //
 // DESCRIPTION:
-//	Android start-up: logcat, the bundled IWAD and the data folder.
+//	Android start-up: logcat, the command line and the data folder.
 //
 //	raylib's NativeActivity glue (rcore_android.c) calls main with
 //	no arguments, no $HOME, "/" as the current directory and stdout
-//	going nowhere. The APK's assets are not files, and DOOM reads
-//	WADs with open/read, so Freedoom is copied out of the APK into
-//	the app's internal storage the first time (and again when the
-//	APK brings a different one).
+//	going nowhere. The APK has no game data: the launcher
+//	(android/app/src/main/java/com/raylib/doom/WadActivity.java)
+//	finds the player's WADs and writes the IWAD and PWADs to use as
+//	a command line in launch.txt in the app's internal storage.
 //
 //-----------------------------------------------------------------------------
 
@@ -32,7 +32,6 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include <android/asset_manager.h>
 #include <android/configuration.h>
 #include <android/log.h>
 #include <android_native_app_glue.h>
@@ -48,11 +47,8 @@
 // raylib's rcore_android.c
 extern struct android_app* GetAndroidApp (void);
 
-// The IWAD and its license, as android/app/build.gradle puts
-// them in the APK.
-static const char* assets[] = { "freedoom1.wad", "freedoom-COPYING.txt" };
-
 static int	logpipe[2];
+static const char*	datadir;
 
 
 //
@@ -119,94 +115,60 @@ static void RedirectOutput (void)
 
 
 //
-// CopyAsset
-// Copies an asset into dir, unless a file of the same size is
-// already there. Written under a temporary name and renamed, so a
-// copy cut short is never taken for the IWAD.
+// ReadArgs
+// There is no command line on Android. launch.txt in the data
+// folder, written by the launcher, has one argument per line
+// ("-iwad", the IWAD's path, "-file" and the PWADs' paths), so
+// paths may hold spaces. args.txt, which can be put there with
+// "adb shell run-as", adds words of its own ("-warp 1 1 -skill 4").
 //
-static void CopyAsset (AAssetManager* mgr, const char* dir, const char* name)
+static int ReadFile (const char* dir, const char* name, int lines,
+		     char** args, int n)
 {
     char	path[1024];
-    char	temp[1040];
-    char	buf[65536];
-    AAsset*	asset;
+    char	word[1024];
     FILE*	f;
-    off_t	size;
-    struct stat	st;
-    int		n;
-    int		ok;
+    int		first = n;
+    size_t	len;
 
-    asset = AAssetManager_open (mgr, name, AASSET_MODE_STREAMING);
-    if (!asset)
-    {
-	printf ("Android: %s is not in the APK\n", name);
-	return;
-    }
-    size = AAsset_getLength (asset);
     snprintf (path, sizeof(path), "%s/%s", dir, name);
-    if (!stat (path, &st) && st.st_size == size)
-    {
-	AAsset_close (asset);
-	return;
-    }
-
-    snprintf (temp, sizeof(temp), "%s.part", path);
-    f = fopen (temp, "wb");
+    f = fopen (path, "r");
     if (!f)
-    {
-	printf ("Android: can not write %s: %s\n", temp, strerror (errno));
-	AAsset_close (asset);
-	return;
-    }
-    ok = 1;
-    while ((n = AAsset_read (asset, buf, sizeof(buf))) > 0)
-	if (fwrite (buf, 1, n, f) != (size_t)n)
-	    ok = 0;
-    if (n < 0)
-	ok = 0;
-    if (fclose (f))
-	ok = 0;
-    AAsset_close (asset);
+	return n;
 
-    if (!ok || rename (temp, path))
+    while (n <= MAXARGS)
     {
-	printf ("Android: could not copy %s to %s\n", name, path);
-	unlink (temp);
-	return;
+	if (lines)
+	{
+	    if (!fgets (word, sizeof(word), f))
+		break;
+	    len = strcspn (word, "\r\n");
+	    word[len] = '\0';
+	    if (!len)
+		continue;
+	}
+	else if (fscanf (f, "%1023s", word) != 1)
+	    break;
+	args[n++] = strdup (word);
     }
-    printf ("Android: copied %s to %s (%ld bytes)\n", name, dir, (long)size);
+    fclose (f);
+    printf ("Android: %d arguments from %s\n", n - first, path);
+    return n;
 }
 
 
-//
-// ReadArgs
-// There is no command line on Android; args.txt in the data
-// folder stands in for one ("-warp 1 1 -skill 4"). It can be put
-// there with "adb shell run-as".
-//
 static void ReadArgs (const char* dir)
 {
     static char*	args[MAXARGS + 2];
-    char		path[1024];
-    char		word[256];
-    FILE*		f;
     int			n;
 
-    snprintf (path, sizeof(path), "%s/args.txt", dir);
-    f = fopen (path, "r");
-    if (!f)
-	return;
-
     args[0] = myargv[0];
-    n = 1;
-    while (n <= MAXARGS && fscanf (f, "%255s", word) == 1)
-	args[n++] = strdup (word);
-    fclose (f);
+    n = ReadFile (dir, "launch.txt", 1, args, 1);
+    n = ReadFile (dir, "args.txt", 0, args, n);
     args[n] = NULL;
 
     myargc = n;
     myargv = args;
-    printf ("Android: %d arguments from %s\n", n - 1, path);
 }
 
 
@@ -224,7 +186,6 @@ void I_AndroidSetup (void)
 {
     struct android_app*	app = GetAndroidApp ();
     const char*		dir;
-    int			i;
 
     RedirectOutput ();
 
@@ -235,9 +196,7 @@ void I_AndroidSetup (void)
 	return;
     }
     mkdir (dir, 0700);
-
-    for (i = 0; i < (int)(sizeof(assets)/sizeof(assets[0])); i++)
-	CopyAsset (app->activity->assetManager, dir, assets[i]);
+    datadir = dir;
 
     setenv ("HOME", dir, 1);
     setenv ("DOOMWADDIR", dir, 1);
@@ -245,4 +204,20 @@ void I_AndroidSetup (void)
 	printf ("Android: can not enter %s: %s\n", dir, strerror (errno));
 
     ReadArgs (dir);
+}
+
+
+void I_AndroidError (const char* message)
+{
+    char	path[1024];
+    FILE*	f;
+
+    if (!datadir)
+	return;
+    snprintf (path, sizeof(path), "%s/error.txt", datadir);
+    f = fopen (path, "w");
+    if (!f)
+	return;
+    fprintf (f, "%s\n", message);
+    fclose (f);
 }
