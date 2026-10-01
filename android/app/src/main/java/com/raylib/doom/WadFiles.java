@@ -8,6 +8,9 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.Locale;
 
 final class WadFiles {
@@ -25,6 +28,26 @@ final class WadFiles {
             return null;
         return "At most " + MAX_PWADS + " add-ons (PWADs) can be loaded at once; "
                + n + " are ticked. Untick some to play.";
+    }
+
+    // A file the launcher looks at: *.wad, in any case.
+    static boolean isWadName(String name) {
+        return name.toLowerCase(Locale.ROOT).endsWith(".wad") && name.length() > 4;
+    }
+
+    // The directory a granted folder's copies go in, from its URI:
+    // the same folder always gets the same one.
+    static String folderId(String uri) {
+        try {
+            byte[] d = MessageDigest.getInstance("SHA-1")
+                .digest(uri.getBytes(StandardCharsets.UTF_8));
+            StringBuilder s = new StringBuilder();
+            for (int i = 0; i < 8; i++)
+                s.append(String.format(Locale.ROOT, "%02x", d[i] & 0xff));
+            return s.toString();
+        } catch (NoSuchAlgorithmException e) {
+            throw new AssertionError(e);
+        }
     }
 
     // The file name an imported WAD gets: its own name, made safe for

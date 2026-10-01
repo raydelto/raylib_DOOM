@@ -1,29 +1,37 @@
 // The launcher: finds the player's WADs, lets them add more, and
 // starts the game (NativeActivity, in its own process) with them.
 //
-// The APK has no game data. WADs come from
+// The APK has no game data, unless it was built with -PbundleWad
+// (android/app/build.gradle): then it holds the shareware DOOM1.WAD as
+// assets/doom1.wad, copied to files/bundled and chosen when nothing
+// else is. WADs come from
 //   - the system file picker (ACTION_OPEN_DOCUMENT), copied into
-//     files/wads in the app's internal storage, and
+//     files/wads in the app's internal storage,
+//   - folders the player granted (ACTION_OPEN_DOCUMENT_TREE), such as
+//     Download, looked through on every launch (see WadFolders), and
 //   - the app's folder in shared storage,
 //     Android/data/<package>/files, where a player can copy them over
 //     USB or with adb push,
-// neither of which needs a storage permission. The IWAD and PWADs
+// none of which needs a storage permission. The IWAD and PWADs
 // chosen are remembered, and handed to the game as a command line
 // in files/launch.txt, one argument per line (see i_android.c).
 
 package com.raylib.doom;
 
 import android.app.Activity;
+import android.app.ActivityManager;
 import android.app.AlertDialog;
 import android.app.NativeActivity;
 import android.content.ActivityNotFoundException;
 import android.content.ClipData;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.graphics.Typeface;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Process;
 import android.provider.OpenableColumns;
 import android.text.TextUtils;
 import android.util.TypedValue;
@@ -48,19 +56,34 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 public class WadActivity extends Activity {
     private static final int PICK_WADS = 1;
+    private static final int PICK_FOLDER = 2;
+    // In the APK when built with -PbundleWad.
+    private static final String BUNDLED_ASSET = "doom1.wad";
+    static final String SHAREWARE_NOTICE =
+        "DOOM shareware © id Software. Not affiliated with id Software / "
+        + "ZeniMax / Microsoft.";
     private static final String FREEDOOM_URL = "https://freedoom.github.io/download.html";
 
     private final List<Wad> iwads = new ArrayList<>();
     private final List<Wad> pwads = new ArrayList<>();
     // Files in the folders that are not usable WADs: name and reason.
     private final List<String> rejected = new ArrayList<>();
+    // The same for the granted folders, found by sync().
+    private final List<String> folderProblems = new ArrayList<>();
+    // Copies' directory (files/folders/<id>) -> the folder's name.
+    private final Map<File, String> folderNames = new HashMap<>();
+
+    private WadFolders folders;
+    private boolean bundled;
 
     private SharedPreferences prefs;
     private String iwad;
@@ -76,14 +99,107 @@ public class WadActivity extends Activity {
         String list = prefs.getString("pwads", "");
         if (!list.isEmpty())
             chosen.addAll(Arrays.asList(list.split("\n")));
+        folders = new WadFolders(this, prefs);
+        try {
+            bundled = Arrays.asList(getAssets().list("")).contains(BUNDLED_ASSET);
+        } catch (IOException e) {
+            bundled = false;
+        }
     }
 
     @Override
     protected void onResume() {
         super.onResume();
         if (!busy)
-            refresh();
+            sync();
         showGameError();
+    }
+
+    // Puts the bundled WAD in place and brings the granted folders'
+    // copies up to date, away from the UI thread, then shows the WADs.
+    private void sync() {
+        busy = true;
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        col.setPadding(dp(20), dp(16), dp(20), dp(24));
+        text(col, getString(R.string.app_name), 26, true);
+        text(col, "Looking for WAD files…", 15, false);
+        setContentView(col);
+        new Thread(() -> {
+            List<String> problems = new ArrayList<>();
+            String bundleProblem = installBundled();
+            if (bundleProblem != null)
+                problems.add(bundleProblem);
+            folders.sync(problems);
+            Map<File, String> names = new HashMap<>();
+            for (Uri tree : folders.trees())
+                names.put(folders.mirrorDir(tree), folders.name(tree));
+            runOnUiThread(() -> {
+                if (isDestroyed())
+                    return;
+                busy = false;
+                folderProblems.clear();
+                folderProblems.addAll(problems);
+                folderNames.clear();
+                folderNames.putAll(names);
+                refresh();
+                firstLaunch();
+            });
+        }).start();
+    }
+
+    private File bundledFile() {
+        return new File(new File(getFilesDir(), "bundled"), BUNDLED_ASSET);
+    }
+
+    // Copies assets/doom1.wad out of the APK once per install or
+    // update (the game opens WADs by path); null if done, else why not.
+    private String installBundled() {
+        File f = bundledFile();
+        if (!bundled) {
+            WadFolders.deleteTree(f.getParentFile());
+            return null;
+        }
+        long stamp;
+        try {
+            stamp = getPackageManager().getPackageInfo(getPackageName(), 0).lastUpdateTime;
+        } catch (PackageManager.NameNotFoundException e) {
+            stamp = 0;
+        }
+        if (f.isFile() && prefs.getLong("bundled", -1) == stamp)
+            return null;
+        f.getParentFile().mkdirs();
+        File part = new File(f.getPath() + ".part");
+        try {
+            try (InputStream in = getAssets().open(BUNDLED_ASSET);
+                 OutputStream out = new FileOutputStream(part)) {
+                byte[] buf = new byte[1 << 16];
+                int n;
+                while ((n = in.read(buf)) > 0)
+                    out.write(buf, 0, n);
+            }
+            if (!part.renameTo(f))
+                throw new IOException("can not rename " + part);
+            prefs.edit().putLong("bundled", stamp).commit();
+            return null;
+        } catch (IOException e) {
+            return BUNDLED_ASSET + " (included): could not be unpacked ("
+                   + e.getMessage() + ")";
+        } finally {
+            part.delete();
+        }
+    }
+
+    private boolean isBundled(Wad w) {
+        return w.file.equals(bundledFile());
+    }
+
+    // A fresh install of the APK with DOOM1.WAD goes straight into
+    // the game; the launcher is there when the player quits.
+    private void firstLaunch() {
+        if (bundled && !prefs.getBoolean("launched", false) && iwads.size() == 1
+                && isBundled(iwads.get(0)) && chosen.isEmpty())
+            play();
     }
 
     private File importDir() {
@@ -92,16 +208,20 @@ public class WadActivity extends Activity {
         return dir;
     }
 
-    // The folders searched, in order. getFilesDir() itself is where
-    // earlier versions put Freedoom and where the README's run-as
-    // instructions put WADs.
+    // The folders searched, in order: the bundled WAD first, so it is
+    // the one chosen when nothing else is. getFilesDir() itself is
+    // where earlier versions put Freedoom and where the README's
+    // run-as instructions put WADs.
     private List<File> wadDirs() {
         List<File> dirs = new ArrayList<>();
+        dirs.add(bundledFile().getParentFile());
         dirs.add(importDir());
         File ext = getExternalFilesDir(null);
         if (ext != null)
             dirs.add(ext);
         dirs.add(getFilesDir());
+        for (Uri tree : folders.trees())
+            dirs.add(folders.mirrorDir(tree));
         return dirs;
     }
 
@@ -129,6 +249,7 @@ public class WadActivity extends Activity {
                 }
             }
         }
+        rejected.addAll(folderProblems);
 
         // Forget what is gone; with one IWAD, that is the one.
         boolean found = false;
@@ -192,7 +313,8 @@ public class WadActivity extends Activity {
         col.setPadding(dp(20), dp(16), dp(20), dp(24));
 
         text(col, getString(R.string.app_name), 26, true);
-        text(col, getString(R.string.tagline), 15, false);
+        text(col, getString(bundled ? R.string.tagline_shareware : R.string.tagline),
+             15, false);
 
         if (iwads.isEmpty()) {
             text(col, "No game data found", 20, true);
@@ -228,6 +350,8 @@ public class WadActivity extends Activity {
                 group.addView(r);
             }
             col.addView(group);
+            if (bundled)
+                text(col, SHAREWARE_NOTICE, 12, false);
 
             if (!pwads.isEmpty()) {
                 text(col, "Add-ons (PWADs), loaded in the order ticked", 18, true);
@@ -260,12 +384,24 @@ public class WadActivity extends Activity {
         }
 
         button(col, "Add WAD files…", v -> pick());
+        button(col, "Add a folder with WAD files…", v -> pickFolder());
         text(col,
-             "You can also copy WAD files to " + sideloadPath()
+             "A folder you add, such as Documents or a folder in Download "
+             + "(Android 11 and newer do not let apps have Download "
+             + "itself), is looked through for .wad files every time the "
+             + "app starts. You can also copy WAD files to " + sideloadPath()
              + " over USB or with adb push, then tap Rescan. Long-press a "
              + "WAD to remove it from the app.",
              13, false);
-        button(col, "Rescan", v -> refresh());
+        for (Uri tree : folders.trees()) {
+            String name = folderNames.containsKey(folders.mirrorDir(tree))
+                          ? folderNames.get(folders.mirrorDir(tree)) : folders.name(tree);
+            button(col, "Stop using the folder " + name, v -> {
+                folders.remove(tree);
+                sync();
+            });
+        }
+        button(col, "Rescan", v -> sync());
 
         if (!rejected.isEmpty())
             text(col, "Not used:\n" + TextUtils.join("\n", rejected), 13, false);
@@ -277,14 +413,34 @@ public class WadActivity extends Activity {
         setContentView(scroll);
     }
 
+    // The granted folder a WAD's copy comes from, or null.
+    private String folderOf(Wad w) {
+        return folderNames.get(w.file.getParentFile());
+    }
+
     private String label(Wad w) {
-        String where = w.file.getParentFile().equals(getExternalFilesDir(null))
-                       ? " [shared folder]" : "";
-        return w.file.getName() + "\n" + w.describe() + where;
+        String where = "";
+        if (isBundled(w))
+            where = " [included with the app]";
+        else if (w.file.getParentFile().equals(getExternalFilesDir(null)))
+            where = " [shared folder]";
+        else if (folderOf(w) != null)
+            where = " [folder " + folderOf(w) + "]";
+        return w.file.getName() + "\n" + w.describe() + ", "
+               + String.format(Locale.ROOT, "%,d", w.file.length()) + " bytes" + where;
     }
 
     private void longPressRemove(View v, Wad w) {
         v.setOnLongClickListener(x -> {
+            if (isBundled(w)) {
+                message(w.file.getName() + " is included with the app.");
+                return true;
+            }
+            if (folderOf(w) != null) {
+                message(w.file.getName() + " comes from the folder " + folderOf(w)
+                        + ". Delete it there, or stop using the folder.");
+                return true;
+            }
             new AlertDialog.Builder(this)
                 .setTitle("Remove " + w.file.getName() + "?")
                 .setMessage("The file is deleted from " + w.file.getParent() + ".")
@@ -341,7 +497,22 @@ public class WadActivity extends Activity {
             return;
         }
         new File(getFilesDir(), "error.txt").delete();
+        prefs.edit().putBoolean("launched", true).commit();
+        endGame();
         startActivity(new Intent(this, NativeActivity.class));
+    }
+
+    // A game still running (left with Home, then the launcher opened
+    // again) would only come back to the front with its old WADs: end
+    // it, so the game starts again with launch.txt.
+    private void endGame() {
+        ActivityManager am = (ActivityManager) getSystemService(ACTIVITY_SERVICE);
+        List<ActivityManager.RunningAppProcessInfo> procs = am.getRunningAppProcesses();
+        if (procs == null)
+            return;
+        for (ActivityManager.RunningAppProcessInfo p : procs)
+            if (p.processName.equals(getPackageName() + ":game"))
+                Process.killProcess(p.pid);
     }
 
     private static void writeFile(File f, String s) throws IOException {
@@ -392,8 +563,32 @@ public class WadActivity extends Activity {
         }
     }
 
+    private void pickFolder() {
+        Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+        i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                   | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        try {
+            startActivityForResult(i, PICK_FOLDER);
+        } catch (ActivityNotFoundException e) {
+            message("This device can not share a folder with apps. Use Add WAD "
+                    + "files… or copy WAD files to " + sideloadPath() + " instead.");
+        }
+    }
+
     @Override
     protected void onActivityResult(int request, int result, Intent data) {
+        if (request == PICK_FOLDER && result == RESULT_OK && data != null
+                && data.getData() != null) {
+            try {
+                folders.add(data.getData());
+            } catch (SecurityException e) {
+                message("The app was not allowed to read that folder: "
+                        + e.getMessage());
+                return;
+            }
+            sync();
+            return;
+        }
         if (request != PICK_WADS || result != RESULT_OK || data == null)
             return;
         List<Uri> uris = new ArrayList<>();
@@ -524,9 +719,14 @@ public class WadActivity extends Activity {
              + "The id Software DOOM engine (linuxdoom 1.10) ported to raylib. "
              + "It is free software under the GNU General Public License, "
              + "version 2; it comes with no warranty. "
-             + getString(R.string.tagline) + "\n\n"
+             + getString(bundled ? R.string.tagline_shareware : R.string.tagline)
+             + "\n\n"
              + "DOOM is a trademark of id Software; this app is not made or "
              + "endorsed by id Software, Bethesda or ZeniMax.\n\n"
+             + (bundled ? SHAREWARE_NOTICE + " The shareware DOOM1.WAD (episode "
+                          + "1) is included unmodified; it is not covered by the "
+                          + "GPL.\n\n"
+                        : "")
              + "Source code of this version:\n" + BuildConfig.SOURCE_URL,
              14, false);
         button(col, "Open the source code page", v -> openUrl(BuildConfig.SOURCE_URL));

@@ -4,4 +4,6 @@
 <resources>
     <string name="app_name">raylib 1.10 Engine</string>
     <string name="tagline">Compatible with DOOM WAD files. No game data is included.</string>
+    <!-- An APK built with -PbundleWad (android/app/build.gradle). -->
+    <string name="tagline_shareware">Compatible with DOOM WAD files. Includes the shareware episode (DOOM1.WAD).</string>
 </resources>

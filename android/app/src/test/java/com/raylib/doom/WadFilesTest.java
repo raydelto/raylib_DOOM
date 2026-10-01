@@ -11,6 +11,7 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.Arrays;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -177,5 +178,78 @@ public class WadFilesTest {
         p = WadFiles.place(part, dir, "big.wad");
         assertEquals(new File(dir, "big.wad"), p.file);
         assertTrue(p.existing);
+    }
+
+    // ---- Granted folders ----
+
+    @Test
+    public void wadNamesInAnyCase() {
+        assertTrue(WadFiles.isWadName("freedoom1.wad"));
+        assertTrue(WadFiles.isWadName("DOOM.WAD"));
+        assertTrue(WadFiles.isWadName("Sigil.Wad"));
+        assertFalse(WadFiles.isWadName(".wad"));
+        assertFalse(WadFiles.isWadName("doom.wad.zip"));
+        assertFalse(WadFiles.isWadName("readme.txt"));
+    }
+
+    @Test
+    public void folderIdIsStable() {
+        String a = "content://com.android.externalstorage.documents/tree/primary%3ADownload";
+        String b = "content://com.android.externalstorage.documents/tree/primary%3ADocuments";
+        assertEquals(WadFiles.folderId(a), WadFiles.folderId(a));
+        assertFalse(WadFiles.folderId(a).equals(WadFiles.folderId(b)));
+        assertTrue(WadFiles.folderId(a).matches("[0-9a-f]{16}"));
+    }
+
+    // ---- Telling WADs apart (Wad.read) ----
+
+    // A WAD with the given header and empty lumps of these names.
+    private File wad(String magic, String... lumps) throws IOException {
+        java.nio.ByteBuffer b = java.nio.ByteBuffer.allocate(12 + 16 * lumps.length)
+            .order(java.nio.ByteOrder.LITTLE_ENDIAN);
+        b.put(magic.getBytes(StandardCharsets.US_ASCII)).putInt(lumps.length).putInt(12);
+        for (String l : lumps) {
+            b.putInt(12).putInt(0);
+            byte[] n = new byte[8];
+            byte[] s = l.getBytes(StandardCharsets.US_ASCII);
+            System.arraycopy(s, 0, n, 0, s.length);
+            b.put(n);
+        }
+        File f = tmp.newFile();
+        Files.write(f.toPath(), b.array());
+        return f;
+    }
+
+    @Test
+    public void iwadModes() throws Exception {
+        assertEquals(Wad.Mode.SHAREWARE, Wad.read(wad("IWAD", "PLAYPAL", "E1M1")).mode);
+        assertEquals(Wad.Mode.REGISTERED, Wad.read(wad("IWAD", "E1M1", "E3M1")).mode);
+        assertEquals(Wad.Mode.RETAIL, Wad.read(wad("IWAD", "E1M1", "E4M1")).mode);
+        assertEquals(Wad.Mode.COMMERCIAL, Wad.read(wad("IWAD", "MAP01")).mode);
+        Wad p = Wad.read(wad("PWAD", "E5M1"));
+        assertEquals(Wad.Kind.PWAD, p.kind);
+        assertEquals(1, p.lumps);
+    }
+
+    private void refused(File f) throws IOException {
+        try {
+            Wad.read(f);
+        } catch (Wad.BadWadException e) {
+            assertNotNull(e.getMessage());
+            return;
+        }
+        throw new AssertionError(f + " was taken for a WAD");
+    }
+
+    @Test
+    public void badFilesRefused() throws IOException {
+        refused(write(tmp.newFile(), "Hello, this is not a WAD file at all"));
+        refused(write(tmp.newFile(), "IWAD"));
+        refused(wad("IWAD", "PLAYPAL"));
+        // A directory past the end of the file: cut short.
+        File f = wad("PWAD", "E1M1");
+        byte[] b = Files.readAllBytes(f.toPath());
+        Files.write(f.toPath(), Arrays.copyOf(b, b.length - 8));
+        refused(f);
     }
 }
