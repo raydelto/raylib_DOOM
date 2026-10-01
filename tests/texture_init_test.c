@@ -158,7 +158,7 @@ static void Put32 (unsigned char* p, int v)
 }
 
 // A 4x8 patch, every pixel 7.
-static unsigned char	patch[8 + 4*4 + 4*(3+8+1)];
+static unsigned char	patch[8 + 4*4 + 4*(3+8+1+1)];
 
 static void MakePatch (void)
 {
@@ -169,12 +169,12 @@ static void MakePatch (void)
     Put16 (patch+2, 8);	// height
     for (x = 0; x < 4; x++)
     {
-	Put32 (patch+8+4*x, 8+16 + 12*x);
-	col = patch+8+16 + 12*x;
+	Put32 (patch+8+4*x, 8+16 + 13*x);
+	col = patch+8+16 + 13*x;
 	col[0] = 0;	// topdelta
 	col[1] = 8;	// length
 	memset (col+3, 7, 8);
-	col[11] = 0xff;
+	col[12] = 0xff;	// after the pad byte
     }
 }
 
@@ -239,6 +239,29 @@ static int AllBytes (const byte* p, int n, byte v)
     return 1;
 }
 
+// Walks a column's posts as R_DrawMaskedColumn does, from
+// R_GetColumn - 3 (r_segs.c), so ASan sees any read past the
+// column. Returns the pixels drawn, or -1 if one is not 7.
+static int MaskedPixels (int tex, int x)
+{
+    column_t*	column = (column_t *)(R_GetColumn (tex, x) - 3);
+    const byte*	source;
+    int		drawn = 0;
+    int		posts;
+
+    for (posts = 0; column->topdelta != 0xff; posts++)
+    {
+	if (posts > 8)
+	    return -1;
+	source = (byte *)column + 3;
+	if (!AllBytes (source, column->length, 7))
+	    return -1;
+	drawn += column->length;
+	column = (column_t *)((byte *)column + column->length + 4);
+    }
+    return drawn;
+}
+
 int main (void)
 {
     int		tex;
@@ -267,25 +290,43 @@ int main (void)
     {
 	CHECK (texturecolumnlump[tex][x] == W_GetNumForName ("PATCHA"));
 	CHECK (AllBytes (R_GetColumn (tex, x), 8, 7));
+	CHECK (MaskedPixels (tex, x) == 8);
     }
 
-    // The patch that is there is drawn, the gap left blank.
+    // The patch that is there is drawn, the gap left blank, and
+    // transparent when it is a masked middle texture.
     tex = R_TextureNumForName ("HALF");
     for (x = 0; x < 4; x++)
+    {
 	CHECK (AllBytes (R_GetColumn (tex, x), 8, 7));
+	CHECK (MaskedPixels (tex, x) == 8);
+    }
     for (x = 4; x < 8; x++)
+    {
 	CHECK (AllBytes (R_GetColumn (tex, x), 8, 0));
+	CHECK (MaskedPixels (tex, x) == 0);
+    }
 
-    // No patch at all: a blank texture, not a crash.
+    // No patch at all: a blank texture, not a crash, and
+    // nothing drawn as a masked texture.
     tex = R_TextureNumForName ("SKY4");
     for (x = 0; x < 8; x++)
+    {
 	CHECK (AllBytes (R_GetColumn (tex, x), 8, 0));
+	CHECK (MaskedPixels (tex, x) == 0);
+    }
 
     tex = R_TextureNumForName ("BADINDEX");
     for (x = 0; x < 4; x++)
+    {
 	CHECK (AllBytes (R_GetColumn (tex, x), 8, 7));
+	CHECK (MaskedPixels (tex, x) == 8);
+    }
     for (x = 4; x < 8; x++)
+    {
 	CHECK (AllBytes (R_GetColumn (tex, x), 8, 0));
+	CHECK (MaskedPixels (tex, x) == 0);
+    }
 
     if (failures)
     {

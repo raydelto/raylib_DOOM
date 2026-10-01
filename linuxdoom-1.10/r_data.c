@@ -223,6 +223,10 @@ R_DrawColumnInCache
 
 
 
+// texturecolumnlump for a column no patch covers; like -1, its
+// pixels are in the composite.
+#define COL_UNCOVERED	-2
+
 //
 // R_GenerateComposite
 // Using the texture definition,
@@ -252,6 +256,10 @@ void R_GenerateComposite (int texnum)
 
     collump = texturecolumnlump[texnum];
     colofs = texturecolumnofs[texnum];
+
+    for (x=0 ; x<texture->width ; x++)
+	if (collump[x] == COL_UNCOVERED)
+	    block[colofs[x]-3] = 0xff;
     
     // Composite the columns together.
     patch = texture->patches;
@@ -355,16 +363,24 @@ void R_GenerateLookup (int texnum)
     for (x=0 ; x<texture->width ; x++)
     {
 	// A column no patch covers (its patch is missing, see
-	// R_InitTextures) is left blank in the composite, rather
-	// than with no lump to draw from.
-	if (!patchcount[x] && !reported)
+	// R_InitTextures) gets a blank column in the composite,
+	// after an empty post list for masked drawing, which reads
+	// from 3 bytes before the pixels (r_segs.c): 0xff, 0, 0.
+	if (!patchcount[x])
 	{
-	    printf ("R_GenerateLookup: column without a patch (%.8s)\n",
-		    texture->name);
+	    if (!reported)
+		printf ("R_GenerateLookup: column without a patch (%.8s)\n",
+			texture->name);
 	    reported = true;
+	    collump[x] = COL_UNCOVERED;
+	    colofs[x] = texturecompositesize[texnum] + 3;
+	    if (texturecompositesize[texnum] > 0x10000-3-texture->height)
+		I_Error ("R_GenerateLookup: texture %i is >64k", texnum);
+	    texturecompositesize[texnum] += 3 + texture->height;
+	    continue;
 	}
 	
-	if (patchcount[x] != 1)
+	if (patchcount[x] > 1)
 	{
 	    // Use the cached block.
 	    collump[x] = -1;	
