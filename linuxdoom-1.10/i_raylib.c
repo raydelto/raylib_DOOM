@@ -293,6 +293,10 @@ static Vector2		lastmouse;
 
 static int		wslmouse;
 
+#ifdef __EMSCRIPTEN__
+static int		webtouch;	// the page shows touch controls
+#endif
+
 static void WSL_Grab (int grab);
 static void WSL_FilterMotion (Vector2 pos, int* dx, int* dy);
 
@@ -509,6 +513,11 @@ void RL_SetMouseGrab (int grab)
     // controls have it instead.
     grab = 0;
 #endif
+#ifdef __EMSCRIPTEN__
+    // Nor while the page shows its touch controls.
+    if (webtouch)
+	grab = 0;
+#endif
 
     if (grab == mousegrabbed)
 	return;
@@ -706,6 +715,40 @@ static void DrawTouchControls (void)
 	DrawText (b->label, (int)(r.x + (r.width - w) / 2),
 		  (int)(r.y + (r.height - size) / 2), size, Fade (WHITE, 0.7f));
     }
+}
+#endif
+
+
+#ifdef __EMSCRIPTEN__
+//
+// WEB TOUCH CONTROLS
+//
+// On a phone the page (web/shell.html) draws the controls in HTML
+// over the canvas and calls RL_WebTouch with the buttons of i_xr.h
+// held, which i_video.c turns into keys as on Android.
+//
+
+static unsigned		webheld;
+static unsigned		webpressed;	// since the last RL_PadButtons
+
+
+// shown: the page shows the controls, so the mouse is not grabbed.
+EMSCRIPTEN_KEEPALIVE void RL_WebTouch (int shown, unsigned buttons)
+{
+    webtouch = shown;
+    webpressed |= buttons & ~webheld;
+    webheld = buttons;
+}
+
+
+unsigned RL_PadButtons (void)
+{
+    // A tap that ends before the next tic still presses its key
+    // for a tic.
+    unsigned	held = webheld | webpressed;
+
+    webpressed = 0;
+    return held;
 }
 #endif
 

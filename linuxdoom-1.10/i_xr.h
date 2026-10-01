@@ -40,7 +40,13 @@ enum
     XR_RUN		= 1 << 8,
     XR_MENU		= 1 << 9,
     XR_MAP		= 1 << 10,
-    XR_NUMBUTTONS	= 11
+    // Only the web page's touch controls have these.
+    XR_STRAFE		= 1 << 11,
+    XR_WEAPPREV		= 1 << 12,
+    XR_WEAPNEXT		= 1 << 13,
+    XR_ENTER		= 1 << 14,
+    XR_YES		= 1 << 15,
+    XR_NUMBUTTONS	= 16
 };
 
 // Before the window opens: puts OpenGL on the GPU the headset

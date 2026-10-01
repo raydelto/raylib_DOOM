@@ -2,12 +2,14 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>raylib DOOM</title>
 <style>
   html, body { margin: 0; height: 100%; background: #000; color: #ddd;
                font: 15px/1.4 system-ui, sans-serif; overflow: hidden; }
-  #canvas { display: block; width: 100vw; height: 100vh; outline: none; }
+  html, body { touch-action: none; overscroll-behavior: none; }
+  #canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
+            outline: none; }
   #overlay { position: fixed; inset: 0; display: flex; align-items: center;
              justify-content: center; background: rgba(0, 0, 0, .82); }
   #overlay.hidden, #hint.hidden, .hidden { display: none; }
@@ -27,11 +29,68 @@
   #hint { position: fixed; top: .6em; left: 50%; transform: translateX(-50%);
           padding: .3em .8em; background: rgba(0, 0, 0, .7); border-radius: 4px;
           pointer-events: none; }
+
+  /* Touch controls, shown on phones and tablets while playing. */
+  #touch { position: fixed; inset: 0; pointer-events: none;
+           --u: clamp(42px, 11vmin, 64px); --gap: calc(var(--u) * .22);
+           --edge: calc(var(--u) * .3);
+           -webkit-user-select: none; user-select: none;
+           -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
+  #touch > * { position: absolute; pointer-events: auto; }
+  #touch .b { display: flex; align-items: center; justify-content: center;
+              box-sizing: border-box; border: 2px solid rgba(255, 255, 255, .4);
+              border-radius: calc(var(--u) * .25); background: rgba(255, 255, 255, .12);
+              color: rgba(255, 255, 255, .75); font: bold calc(var(--u) * .3)/1 system-ui, sans-serif; }
+  #touch .b.on { background: rgba(255, 255, 255, .38); }
+  #touch .hidden { display: none; }
+  #tl, #tr { display: flex; flex-direction: column; gap: var(--gap);
+             top: calc(env(safe-area-inset-top) + var(--edge)); }
+  #tl { left: calc(env(safe-area-inset-left) + var(--edge)); }
+  #tr { right: calc(env(safe-area-inset-right) + var(--edge)); }
+  #tl .b, #tr .b { width: calc(var(--u) * 1.5); height: calc(var(--u) * .8); }
+  #stick { left: calc(env(safe-area-inset-left) + var(--edge));
+           bottom: calc(env(safe-area-inset-bottom) + var(--edge));
+           width: calc(var(--u) * 3); height: calc(var(--u) * 3); border-radius: 50%;
+           border: 2px solid rgba(255, 255, 255, .4); background: rgba(255, 255, 255, .08); }
+  #knob { position: absolute; left: 50%; top: 50%; width: calc(var(--u) * 1.2);
+          height: calc(var(--u) * 1.2); margin: calc(var(--u) * -.6) 0 0 calc(var(--u) * -.6);
+          border-radius: 50%; background: rgba(255, 255, 255, .3); pointer-events: none; }
+  #pad { right: calc(env(safe-area-inset-right) + var(--edge));
+         bottom: calc(env(safe-area-inset-bottom) + var(--edge));
+         display: grid; gap: var(--gap); grid-template-columns: repeat(3, var(--u));
+         grid-template-rows: repeat(3, var(--u));
+         grid-template-areas: "strafe prev next" "run fire fire" "use fire fire"; }
+  #pad .b { font-size: calc(var(--u) * .24); white-space: nowrap; }
+  #pad .fire { grid-area: fire; border-radius: 50%; font-size: calc(var(--u) * .4);
+               background: rgba(255, 60, 60, .22); }
+  #pad .fire.on { background: rgba(255, 60, 60, .5); }
 </style>
 </head>
 <body>
 <canvas id="canvas" tabindex="-1"></canvas>
 <div id="hint" class="hidden">Click to capture the mouse</div>
+
+<!-- data-b: the button of linuxdoom-1.10/i_xr.h each one holds. -->
+<div id="touch" class="hidden">
+  <div id="tl">
+    <div class="b" data-b="512">MENU</div>
+    <div class="b" data-b="16384">ENTER</div>
+    <div class="b" data-b="32768">Y</div>
+  </div>
+  <div id="tr">
+    <div class="b" data-b="1024">MAP</div>
+    <div class="b hidden" id="full">FULL</div>
+  </div>
+  <div id="stick"><div id="knob"></div></div>
+  <div id="pad">
+    <div class="b" data-b="2048" style="grid-area: strafe">STRAFE</div>
+    <div class="b" data-b="4096" style="grid-area: prev">WPN &minus;</div>
+    <div class="b" data-b="8192" style="grid-area: next">WPN +</div>
+    <div class="b" data-b="256" style="grid-area: run">RUN</div>
+    <div class="b" data-b="128" style="grid-area: use">USE</div>
+    <div class="b fire" data-b="64">FIRE</div>
+  </div>
+</div>
 
 <div id="overlay">
   <div id="panel">
@@ -45,6 +104,8 @@
       <button id="forget" class="hidden">Back to Freedoom</button>
       <input id="picker" type="file" accept=".wad,.WAD" multiple class="hidden">
     </div>
+    <p id="touchnote" class="hidden"><small>Touch controls: the stick moves
+      and turns, STRAFE makes it sidestep, MENU opens the menu.</small></p>
     <p><small>Keyboard to play, mouse once captured (Esc lets go).
       Alt+Enter: fullscreen. Saved games and settings stay in this browser.
       <a href="freedoom-COPYING.txt">Freedoom license</a>.</small></p>
@@ -79,6 +140,7 @@
 
   function showOverlay(text, error) {
     running = false;
+    showTouch();
     hint.classList.add('hidden');
     if (document.pointerLockElement)
       document.exitPointerLock();
@@ -141,6 +203,7 @@
     canvas.focus();
     // Called from the click, so the audio context may start.
     Module.callMain(gameArgs());
+    showTouch();
   }
 
   var Module = window.Module = {
@@ -273,6 +336,152 @@
     });
   };
 
+  // Touch controls. They are shown on a device whose main pointer
+  // is a finger, or once the screen is touched, and hidden again
+  // when a keyboard is used. ?touch=1 or ?touch=0 forces them on
+  // or off. Each finger holds the button under it, or the stick;
+  // RL_WebTouch passes what is held to the game, which presses the
+  // keys the buttons stand for.
+  var touch = document.getElementById('touch');
+  var stick = document.getElementById('stick');
+  var knob = document.getElementById('knob');
+  var full = document.getElementById('full');
+  var FORWARD = 1, BACK = 2, TURNLEFT = 4, TURNRIGHT = 8;
+  var forced = query.get('touch');
+  var touchmode = forced ? forced === '1'
+    : matchMedia('(pointer: coarse)').matches
+      && (navigator.maxTouchPoints > 0 || 'ontouchstart' in window);
+  var fingers = {};   // pointerId: { stick: bits } or { el: button }
+  var sent = -1;
+
+  function touchShown() {
+    return running && touchmode;
+  }
+
+  function sendTouch() {
+    var held = 0;
+    touch.querySelectorAll('.b.on').forEach(function (b) {
+      b.classList.remove('on');
+    });
+    Object.keys(fingers).forEach(function (id) {
+      var f = fingers[id];
+      if (f.el) {
+        f.el.classList.add('on');
+        held |= +f.el.dataset.b;
+      } else
+        held |= f.stick;
+    });
+    var shown = touchShown() ? 1 : 0;
+    // Once the game has started, and until it knows nothing is held.
+    if (shown * 65536 + held !== sent && (running || sent > 0)) {
+      sent = shown * 65536 + held;
+      Module._RL_WebTouch(shown, held);
+    }
+  }
+
+  function showTouch() {
+    var shown = touchShown();
+    touch.classList.toggle('hidden', !shown);
+    document.getElementById('touchnote').classList.toggle('hidden', !touchmode);
+    if (!shown) {
+      fingers = {};
+      knob.style.transform = '';
+    }
+    sendTouch();
+  }
+
+  function moveStick(f, e) {
+    var r = stick.getBoundingClientRect();
+    var radius = r.width / 2;
+    var x = (e.clientX - r.left - radius) / radius;
+    var y = (e.clientY - r.top - radius) / radius;
+    var len = Math.sqrt(x * x + y * y);
+    if (len > 1) {
+      x /= len;
+      y /= len;
+    }
+    knob.style.transform = 'translate(' + x * radius * .6 + 'px,' + y * radius * .6 + 'px)';
+    f.stick = (y < -.35 ? FORWARD : 0) | (y > .35 ? BACK : 0)
+      | (x < -.35 ? TURNLEFT : 0) | (x > .35 ? TURNRIGHT : 0);
+  }
+
+  function buttonAt(e) {
+    var el = document.elementFromPoint(e.clientX, e.clientY);
+    return el && el.closest ? el.closest('#touch [data-b]') : null;
+  }
+
+  touch.addEventListener('pointerdown', function (e) {
+    e.preventDefault();
+    if (e.target === stick) {
+      fingers[e.pointerId] = { stick: 0 };
+      moveStick(fingers[e.pointerId], e);
+    } else {
+      var el = buttonAt(e);
+      if (!el)
+        return;
+      fingers[e.pointerId] = { el: el };
+    }
+    sendTouch();
+  });
+  // A finger may slide from one button to the next.
+  touch.addEventListener('pointermove', function (e) {
+    var f = fingers[e.pointerId];
+    if (!f)
+      return;
+    if (f.el) {
+      var el = buttonAt(e);
+      if (el)
+        f.el = el;
+    } else
+      moveStick(f, e);
+    sendTouch();
+  });
+  function lift(e) {
+    var f = fingers[e.pointerId];
+    if (!f)
+      return;
+    if (!f.el)
+      knob.style.transform = '';
+    delete fingers[e.pointerId];
+    sendTouch();
+  }
+  touch.addEventListener('pointerup', lift);
+  touch.addEventListener('pointercancel', lift);
+  touch.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+
+  // Not every phone has the Fullscreen API (iPhones do not).
+  if (document.documentElement.requestFullscreen)
+    full.classList.remove('hidden');
+  full.addEventListener('click', function () {
+    if (document.fullscreenElement)
+      document.exitFullscreen();
+    else
+      document.documentElement.requestFullscreen().catch(function () {});
+  });
+
+  window.addEventListener('pointerdown', function (e) {
+    if (e.pointerType === 'touch' && !touchmode && !forced) {
+      touchmode = true;
+      showTouch();
+    }
+  }, true);
+  window.addEventListener('keydown', function (e) {
+    if (running && touchmode && !forced && !e.repeat) {
+      touchmode = false;
+      showTouch();
+    }
+  }, true);
+
+  // No pinch zoom, double-tap zoom or page scrolling on the game.
+  ['gesturestart', 'gesturechange', 'dblclick'].forEach(function (type) {
+    document.addEventListener(type, function (e) { e.preventDefault(); });
+  });
+  document.addEventListener('touchmove', function (e) {
+    if (running)
+      e.preventDefault();
+  }, { passive: false });
+
+  showTouch();
   describeWads();
 })();
 </script>
