@@ -59,6 +59,8 @@ abstract class LicenseAssets extends DefaultTask {
     @Input abstract MapProperty<String, String> getNames()
     @InputFiles abstract ConfigurableFileCollection getSources()
     @OutputDirectory abstract DirectoryProperty getOutputDir()
+    // -PbundleWad: the notices say DOOM1.WAD is included.
+    @Input abstract Property<Boolean> getBundledWad()
 
     @TaskAction
     void copy() {
@@ -67,6 +69,22 @@ abstract class LicenseAssets extends DefaultTask {
         out.mkdirs()
         names.get().each { from, name ->
             new File(out, name).bytes = new File(from).bytes
+        }
+        if (bundledWad.get()) {
+            File notices = new File(out, 'THIRD-PARTY-NOTICES.txt')
+            String text = notices.getText('UTF-8')
+            String noData = 'No game data (IWAD or PWAD) is included: the player supplies their\n' +
+                            'own WAD files. The app is compatible with DOOM WAD files; it is not\n' +
+                            'made or endorsed by id Software, Bethesda or ZeniMax.'
+            if (!text.contains(noData))
+                throw new GradleException("${notices.name}: no \"${noData}\" to replace")
+            notices.setText(text.replace(noData,
+                'This APK includes the shareware DOOM1.WAD (episode 1), unmodified.\n' +
+                'DOOM shareware © id Software. Not affiliated with id Software /\n' +
+                'ZeniMax / Microsoft. DOOM1.WAD is not covered by the GPL or by the\n' +
+                'licenses below. Other WAD files are supplied by the player. The app\n' +
+                'is compatible with DOOM WAD files; it is not made or endorsed by id\n' +
+                'Software, Bethesda or ZeniMax.'), 'UTF-8')
         }
     }
 }
@@ -101,6 +119,7 @@ def licenseFiles = [
 
 def licenses = tasks.register('licenseAssets', LicenseAssets) {
     names = licenseFiles
+    bundledWad = bundleWad.isPresent()
     sources.from(licenseFiles.keySet())
     outputDir = layout.buildDirectory.dir('generated/licenses')
 }

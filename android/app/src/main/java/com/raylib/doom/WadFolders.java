@@ -3,7 +3,8 @@
 // permission is needed; on every launch the folder is listed and its
 // *.wad files (any case) are copied into files/folders/<id>/, where
 // the game can open them by path. A copy is made again only when the
-// file's size or date changes, and removed when the file is gone.
+// file's size or date changes (always, when the provider does not
+// give both), and removed when the file is gone.
 
 package com.raylib.doom;
 
@@ -18,10 +19,8 @@ import android.provider.DocumentsContract.Document;
 import android.text.TextUtils;
 
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -149,11 +148,21 @@ final class WadFolders {
                 long size = c.isNull(3) ? -1 : c.getLong(3);
                 long modified = c.isNull(4) ? 0 : c.getLong(4);
                 File copy = new File(dir, safe);
-                if (copy.isFile() && copy.length() == size
-                        && (modified == 0 || copy.lastModified() == modified))
+                if (WadFiles.copyIsCurrent(copy, size, modified))
                     continue;
                 Uri doc = DocumentsContract.buildDocumentUriUsingTree(tree, c.getString(0));
-                String problem = copy(cr, doc, copy, modified);
+                String problem;
+                try (InputStream in = cr.openInputStream(doc)) {
+                    if (in == null) {
+                        copy.delete();
+                        problem = "can not be opened";
+                    } else {
+                        problem = WadFiles.copyWad(in, copy, modified);
+                    }
+                } catch (IOException | SecurityException e) {
+                    copy.delete();
+                    problem = "can not be read (" + e.getMessage() + ")";
+                }
                 if (problem != null)
                     problems.add(folder + "/" + name + ": " + problem);
             }
@@ -163,42 +172,6 @@ final class WadFolders {
             for (File f : files)
                 if (!present.contains(f.getName()))
                     f.delete();
-    }
-
-    // Null if done, else why not. Only a WAD is kept: anything else
-    // is turned down after its header, without copying the rest.
-    private static String copy(ContentResolver cr, Uri doc, File dest, long modified) {
-        File part = new File(dest.getPath() + ".part");
-        dest.delete();
-        try {
-            try (InputStream in = cr.openInputStream(doc);
-                 OutputStream out = new FileOutputStream(part)) {
-                if (in == null)
-                    return "can not be opened";
-                byte[] buf = new byte[1 << 16];
-                int n = 0, r;
-                while (n < 4 && (r = in.read(buf, n, buf.length - n)) > 0)
-                    n += r;
-                String magic = new String(buf, 0, Math.min(n, 4), "US-ASCII");
-                if (!magic.equals("IWAD") && !magic.equals("PWAD"))
-                    return "not a WAD file";
-                out.write(buf, 0, n);
-                while ((n = in.read(buf)) > 0)
-                    out.write(buf, 0, n);
-            }
-            Wad.read(part);
-            if (!part.renameTo(dest))
-                return "could not be saved";
-            if (modified != 0)
-                dest.setLastModified(modified);
-            return null;
-        } catch (Wad.BadWadException e) {
-            return e.getMessage();
-        } catch (IOException | SecurityException e) {
-            return "can not be read (" + e.getMessage() + ")";
-        } finally {
-            part.delete();
-        }
     }
 
     static void deleteTree(File f) {

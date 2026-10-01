@@ -252,4 +252,74 @@ public class WadFilesTest {
         Files.write(f.toPath(), Arrays.copyOf(b, b.length - 8));
         refused(f);
     }
+
+    // ---- Refreshing a granted folder's copy ----
+
+    private static java.io.InputStream in(File f) throws IOException {
+        return new java.io.ByteArrayInputStream(Files.readAllBytes(f.toPath()));
+    }
+
+    @Test
+    public void copyCurrentOnlyWithKnownSizeAndDate() throws Exception {
+        File copy = tmp.newFile();
+        Files.write(copy.toPath(), new byte[100]);
+        assertTrue(copy.setLastModified(1700000000000L));
+        assertTrue(WadFiles.copyIsCurrent(copy, 100, 1700000000000L));
+        assertFalse(WadFiles.copyIsCurrent(copy, 100, 1700000001000L));
+        assertFalse(WadFiles.copyIsCurrent(copy, 101, 1700000000000L));
+        // The provider gave no date, or no size: read it again.
+        assertFalse(WadFiles.copyIsCurrent(copy, 100, 0));
+        assertFalse(WadFiles.copyIsCurrent(copy, -1, 1700000000000L));
+        assertFalse(WadFiles.copyIsCurrent(new File(copy.getPath() + "x"), 100, 0));
+    }
+
+    @Test
+    public void sameSizeOtherWadReplacesTheCopy() throws Exception {
+        File a = wad("PWAD", "E1M1"), b = wad("PWAD", "E2M1");
+        assertEquals(a.length(), b.length());
+        File copy = new File(tmp.newFolder(), "mod.wad");
+        assertNull(WadFiles.copyWad(in(a), copy, 0));
+        assertArrayEquals(Files.readAllBytes(a.toPath()), Files.readAllBytes(copy.toPath()));
+        // Replaced in the folder by different bytes of the same size,
+        // with no date from the provider.
+        assertFalse(WadFiles.copyIsCurrent(copy, b.length(), 0));
+        assertNull(WadFiles.copyWad(in(b), copy, 0));
+        assertArrayEquals(Files.readAllBytes(b.toPath()), Files.readAllBytes(copy.toPath()));
+        assertFalse(new File(copy.getPath() + ".part").exists());
+    }
+
+    @Test
+    public void sameSizeNonWadRemovesTheCopy() throws Exception {
+        File a = wad("PWAD", "E1M1");
+        File copy = new File(tmp.newFolder(), "mod.wad");
+        assertNull(WadFiles.copyWad(in(a), copy, 0));
+        byte[] junk = new byte[(int) a.length()];
+        Arrays.fill(junk, (byte) 'x');
+        File j = tmp.newFile();
+        Files.write(j.toPath(), junk);
+        assertFalse(WadFiles.copyIsCurrent(copy, j.length(), 0));
+        assertEquals("not a WAD file", WadFiles.copyWad(in(j), copy, 0));
+        assertFalse(copy.exists());
+
+        // A WAD header with a broken directory, same size again.
+        assertNull(WadFiles.copyWad(in(a), copy, 0));
+        byte[] broken = Files.readAllBytes(a.toPath());
+        broken[8] = 0x7f;   // the directory offset, now past the end
+        File k = tmp.newFile();
+        Files.write(k.toPath(), broken);
+        assertNotNull(WadFiles.copyWad(in(k), copy, 0));
+        assertFalse(copy.exists());
+        assertFalse(new File(copy.getPath() + ".part").exists());
+    }
+
+    @Test
+    public void identicalCopyKeptWithItsDate() throws Exception {
+        File a = wad("IWAD", "E1M1");
+        File copy = new File(tmp.newFolder(), "doom1.wad");
+        assertNull(WadFiles.copyWad(in(a), copy, 1700000000000L));
+        assertEquals(1700000000000L, copy.lastModified());
+        assertTrue(WadFiles.copyIsCurrent(copy, a.length(), 1700000000000L));
+        assertNull(WadFiles.copyWad(in(a), copy, 0));
+        assertArrayEquals(Files.readAllBytes(a.toPath()), Files.readAllBytes(copy.toPath()));
+    }
 }
