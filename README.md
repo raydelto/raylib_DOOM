@@ -326,10 +326,11 @@ how the frame reaches the headset.
 
 ## Android and Android XR
 
-`android/` is a Gradle project that builds the game as an APK with
-no Java: `CMakeLists.txt`, configured by the NDK with
+`android/` is a Gradle project that builds the game as an APK:
+`CMakeLists.txt`, configured by the NDK with
 `-DRAYLIB_DOOM_ANDROID=ON`, makes `libraylibdoom.so`, which
-`NativeActivity` loads (raylib's `PLATFORM=Android`). The desktop,
+`NativeActivity` loads (raylib's `PLATFORM=Android`), started by a
+small Java launcher that finds the player's WADs. The desktop,
 Windows, macOS, web and OpenXR builds are not affected; the option is
 off unless Gradle sets it. There are two flavors, each for
 `arm64-v8a` (devices) and `x86_64` (the emulator):
@@ -341,7 +342,8 @@ off unless Gradle sets it. There are two flavors, each for
 
 You need the Android SDK with NDK 28.1.13356709 and CMake 3.22.1
 (Android Studio's SDK Manager, or `sdkmanager "ndk;28.1.13356709"
-"cmake;3.22.1"`), and JDK 17 or newer. The Gradle wrapper fetches
+"cmake;3.22.1"`), and a JDK 17 or newer (with `javac`, not only a
+JRE; set `JAVA_HOME` to it). The Gradle wrapper fetches
 Gradle and the Android Gradle plugin. With `ANDROID_HOME` set, or
 `sdk.dir` in `android/local.properties`:
 
@@ -352,35 +354,109 @@ cd android
 # app/build/outputs/apk/xr/debug/app-xr-debug.apk
 ```
 
-The APKs bundle Freedoom: Phase 1 (`freedoom1.wad`, BSD licensed,
-with its `COPYING.txt`), which Gradle downloads and checks against its
-SHA-256 like the web build; `-PfreedoomZip=/path/to/freedoom-0.13.0.zip`
-uses a zip you already have. No other IWAD is bundled. The `android`
-job in `.github/workflows/build.yml` uploads both debug APKs as the
-`raylibdoom-android` artifact.
+The `android` job in `.github/workflows/build.yml` uploads both debug
+APKs as the `raylibdoom-android` artifact.
+
+### No game data is included
+
+The APK holds no WAD at all, not even a free one: the player supplies
+their own, and the app never downloads any. It is an engine
+compatible with DOOM WAD files. A launcher screen (`WadActivity`, the
+only Java in the app) finds the WADs and starts the game:
+
+- **Add WAD files…** opens the system file picker
+  (`ACTION_OPEN_DOCUMENT`). The chosen files are copied into the app's
+  internal storage (`files/wads`), so they stay usable whatever
+  happens to the original.
+- WADs copied over USB or with `adb push` to
+  `Android/data/com.raylib.doom/files/` (`com.raylib.doom.xr` for the
+  `xr` flavor) are found too; tap **Rescan**.
+
+Neither needs a storage permission. IWADs are told apart as on the
+desktop, by the maps in their lump directory (after checking that the
+directory and the lumps fit in the file); with several, the player
+picks one. PWADs are ticked as add-ons and loaded in that order, as
+with `-file`. The choice is remembered. A file that is not a WAD, or a
+damaged one, is refused with a message, and a PWAD alone is told it
+needs an IWAD. With no IWAD the screen says what is needed and links
+to [Freedoom's download page](https://freedoom.github.io/download.html)
+(opened in the browser), and explains that the original game's IWAD
+(`DOOM.WAD`, `DOOM2.WAD`, ...) is in the player's own copy, from Steam
+or GOG for example. **About / Licenses** shows the GPL-2.0, the Nuked
+OPL3 LGPL, the third-party notices for raylib, miniaudio and the rest
+(`packaging/android/THIRD-PARTY-NOTICES.txt`), and a link to the
+source of the exact tag. The app's name, "raylib 1.10 Engine", and
+its icon use no id Software or Bethesda trademark or artwork.
+
+The game runs in a process of its own (`:game`), so when it quits,
+or stops on an error, the launcher comes back; an error (`I_Error`)
+is shown there. `packaging/android/check-no-wad.sh APK...` fails if an
+APK has an entry ending in `.wad` (any case) or another game-data
+extension (`.pk3`, `.lmp`, ...), or any file starting with a WAD
+header; CI runs it on every APK it builds.
 
 Install and start one with `adb`:
 
 ```sh
 adb install -r app/build/outputs/apk/flat/debug/app-flat-debug.apk
-adb shell am start -n com.raylib.doom/android.app.NativeActivity
+adb push freedoom1.wad /sdcard/Android/data/com.raylib.doom/files/
+adb shell monkey -p com.raylib.doom -c android.intent.category.LAUNCHER 1
 adb logcat -s raylibdoom        # DOOM's console output
 ```
 
-(`com.raylib.doom.xr/android.app.NativeActivity` for the `xr`
-flavor.) On the first run the WAD is copied into the app's internal
-storage (`/data/user/0/<package>/files`), which is also where the
-settings (`.doomrc`) and saved games go. To play another IWAD or a
-PWAD, or to pass options, put them there, with a command line in
-`args.txt`:
+The settings (`.doomrc`) and saved games go to the app's internal
+storage (`/data/user/0/<package>/files`). The launcher writes the
+command line it starts the game with to `launch.txt` there, one
+argument per line. To pass more options, put them in `args.txt` (a
+debug build allows `run-as`):
 
 ```sh
-adb push doom2.wad /data/local/tmp/
-adb shell run-as com.raylib.doom cp /data/local/tmp/doom2.wad files/
-echo '-iwad doom2.wad -warp 1 -skill 4' > args.txt
+echo '-warp 1 -skill 4' > args.txt
 adb push args.txt /data/local/tmp/
 adb shell run-as com.raylib.doom cp /data/local/tmp/args.txt files/
 ```
+
+### Release APK
+
+On a `v*` tag, `.github/workflows/release-android.yml` builds
+`raylibdoom-<version>-android-flat.apk` (the `flat` flavor,
+`arm64-v8a` and `x86_64` in one APK) with its `.sha256`, checks it has
+no WAD, and uploads both to the tag's draft release, adding the
+Android section of the release notes
+(`packaging/android/RELEASE-NOTES.md`). `versionName` is the tag
+without the `v` and `versionCode` is `major*1000000 + minor*1000 +
+patch` (`-PappVersion=1.2.3`). Pull requests that touch the Android
+build, and a manual run, build the same release APK unsigned as an
+artifact. The `xr` flavor is not released: it is for headsets and
+glasses, and its OpenXR loader adds another component to ship; it
+stays a CI artifact.
+
+The release APK is signed with a key kept in four repository secrets.
+Without them the tag's job fails rather than upload an unsigned or
+debug-signed APK. To make the key (once; keep the keystore and its
+passwords safe and out of the repository, as every later update must
+be signed with the same key):
+
+```sh
+keytool -genkeypair -v -keystore raylibdoom-release.jks \
+    -alias raylibdoom -keyalg RSA -keysize 4096 -validity 10000 \
+    -dname "CN=raylib DOOM, O=raylib DOOM"
+base64 -w0 raylibdoom-release.jks > raylibdoom-release.jks.b64
+gh secret set ANDROID_KEYSTORE_BASE64 < raylibdoom-release.jks.b64
+gh secret set ANDROID_KEYSTORE_PASSWORD     # the keystore password
+gh secret set ANDROID_KEY_ALIAS --body raylibdoom
+gh secret set ANDROID_KEY_PASSWORD          # the key password
+rm raylibdoom-release.jks.b64
+```
+
+To sign locally, pass the keystore and set the same variables:
+`ANDROID_KEYSTORE_PASSWORD=... ANDROID_KEY_ALIAS=... ANDROID_KEY_PASSWORD=...
+./gradlew assembleFlatRelease -PappVersion=1.2.3 -PreleaseKeystore=/path/to/raylibdoom-release.jks`.
+
+Players install it by opening the downloaded APK on the device and
+allowing their browser or file manager to install unknown apps.
+
+### Controls and Android XR
 
 A Bluetooth or USB gamepad plays with the controller mapping of the
 [VR headsets](#vr-headsets-openxr) table: left stick (or d-pad up and
@@ -444,8 +520,10 @@ with the compute puck and plays as on a phone.
 - `i_xr.c` / `i_xr.h`: new, the OpenXR output of `raylib_doom_xr`
   (`-DRAYLIB_DOOM_XR=ON`), compiled into that target only;
   `tests/xr_test.c` tests it.
-- Android: `i_android.c` / `i_android.h` (logcat, the bundled IWAD,
-  the data folder, `args.txt`), the gamepad and touch controls in
+- Android: the launcher in `android/app/src/main/java` (the player's
+  WADs: file picker, shared folder, IWAD detection, About / Licenses),
+  `i_android.c` / `i_android.h` (logcat, the data folder,
+  `launch.txt` and `args.txt`, errors for the launcher), the gamepad and touch controls in
   `i_raylib.c`, and the EGL / OpenGL ES graphics binding and
   `xrInitializeLoaderKHR` in `i_xr.c` for the `xr` flavor of the APK
   in `android/`.
