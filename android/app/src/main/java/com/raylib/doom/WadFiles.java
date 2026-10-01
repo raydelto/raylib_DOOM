@@ -6,8 +6,13 @@ package com.raylib.doom;
 
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.Locale;
 
 final class WadFiles {
@@ -25,6 +30,26 @@ final class WadFiles {
             return null;
         return "At most " + MAX_PWADS + " add-ons (PWADs) can be loaded at once; "
                + n + " are ticked. Untick some to play.";
+    }
+
+    // A file the launcher looks at: *.wad, in any case.
+    static boolean isWadName(String name) {
+        return name.toLowerCase(Locale.ROOT).endsWith(".wad") && name.length() > 4;
+    }
+
+    // The directory a granted folder's copies go in, from its URI:
+    // the same folder always gets the same one.
+    static String folderId(String uri) {
+        try {
+            byte[] d = MessageDigest.getInstance("SHA-1")
+                .digest(uri.getBytes(StandardCharsets.UTF_8));
+            StringBuilder s = new StringBuilder();
+            for (int i = 0; i < 8; i++)
+                s.append(String.format(Locale.ROOT, "%02x", d[i] & 0xff));
+            return s.toString();
+        } catch (NoSuchAlgorithmException e) {
+            throw new AssertionError(e);
+        }
     }
 
     // The file name an imported WAD gets: its own name, made safe for
@@ -74,6 +99,53 @@ final class WadFiles {
             return new Placed(dest, false);
         }
         throw new IOException("too many files are named " + name);
+    }
+
+    // A granted folder's file needs no new copy only when its size and
+    // date are both known and match the copy's: a provider may leave
+    // either out (null), and then the file is read again.
+    static boolean copyIsCurrent(File copy, long size, long modified) {
+        return copy.isFile() && size >= 0 && copy.length() == size
+               && modified > 0 && copy.lastModified() == modified;
+    }
+
+    // Makes dest a copy of in, a WAD from a granted folder; null if
+    // done, else why not, and then no copy is left. Anything but a WAD
+    // is turned down after its header, without copying the rest. A
+    // copy that already has the same bytes is kept as it is.
+    static String copyWad(InputStream in, File dest, long modified) {
+        File part = new File(dest.getPath() + ".part");
+        try {
+            try (OutputStream out = new FileOutputStream(part)) {
+                byte[] buf = new byte[1 << 16];
+                int n = readFully(in, buf);
+                String magic = new String(buf, 0, Math.min(n, 4), StandardCharsets.US_ASCII);
+                if (!magic.equals("IWAD") && !magic.equals("PWAD")) {
+                    dest.delete();
+                    return "not a WAD file";
+                }
+                out.write(buf, 0, n);
+                while ((n = in.read(buf)) > 0)
+                    out.write(buf, 0, n);
+            }
+            Wad.read(part);
+            if (!sameContents(part, dest)) {
+                dest.delete();
+                if (!part.renameTo(dest))
+                    return "could not be saved";
+            }
+            if (modified > 0)
+                dest.setLastModified(modified);
+            return null;
+        } catch (Wad.BadWadException e) {
+            dest.delete();
+            return e.getMessage();
+        } catch (IOException e) {
+            dest.delete();
+            return "can not be read (" + e.getMessage() + ")";
+        } finally {
+            part.delete();
+        }
     }
 
     static boolean sameContents(File a, File b) throws IOException {

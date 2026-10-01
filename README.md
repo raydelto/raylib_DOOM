@@ -381,11 +381,17 @@ only Java in the app) finds the WADs and starts the game:
   (`ACTION_OPEN_DOCUMENT`). The chosen files are copied into the app's
   internal storage (`files/wads`), so they stay usable whatever
   happens to the original.
+- **Add a folder with WAD files…** asks for a folder
+  (`ACTION_OPEN_DOCUMENT_TREE`) such as `Documents` or a folder inside
+  `Download` (Android 11 and newer do not let apps have `Download`
+  itself). The grant is kept, and on every start the folder's `*.wad`
+  files (any case) are copied into `files/folders/`, again only when
+  one changes; **Stop using the folder** forgets it.
 - WADs copied over USB or with `adb push` to
   `Android/data/com.raylib.doom/files/` (`com.raylib.doom.xr` for the
   `xr` flavor) are found too; tap **Rescan**.
 
-Neither needs a storage permission. IWADs are told apart as on the
+None needs a storage permission. IWADs are told apart as on the
 desktop, by the maps in their lump directory (after checking that the
 directory and the lumps fit in the file); with several, the player
 picks one. PWADs are ticked as add-ons and loaded in that order, as
@@ -468,6 +474,25 @@ To sign locally, pass the keystore and set the same variables:
 
 Players install it by opening the downloaded APK on the device and
 allowing their browser or file manager to install unknown apps.
+
+### Shareware APK (DOOM1.WAD included)
+
+One APK, put on a release by hand, includes the shareware `DOOM1.WAD`
+(episode 1), unmodified, as `assets/doom1.wad`: `-PbundleWad=FILE`
+adds it, after checking its SHA-256 and that the file is outside the
+checkout, so it can never be committed. Builds without the property,
+CI and `release-android.yml` among them, stay WAD-free. The launcher
+unpacks it and chooses it when nothing else is chosen; a fresh install
+goes straight into the game. Other IWADs and PWADs are added as above,
+and the launcher shows "DOOM shareware © id Software. Not affiliated
+with id Software / ZeniMax / Microsoft." To build, sign and name it
+(`raylibdoom-<version>-android-shareware.apk` and its `.sha256`):
+
+```sh
+ANDROID_KEYSTORE_PASSWORD=... ANDROID_KEY_ALIAS=... ANDROID_KEY_PASSWORD=... \
+packaging/android/build-shareware.sh 0.1.1 /path/to/DOOM1.WAD \
+    /path/to/raylibdoom-release.jks out/
+```
 
 ### Controls and Android XR
 

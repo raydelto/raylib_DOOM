@@ -14,6 +14,13 @@
 // PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD), as
 // .github/workflows/release-android.yml does; otherwise it is left
 // unsigned (app-<flavor>-release-unsigned.apk).
+//
+// -PbundleWad=FILE puts the shareware DOOM1.WAD (and only that file,
+// checked by its SHA-256) into the APK as assets/doom1.wad, unmodified;
+// the launcher then plays it when no other IWAD is chosen. The file
+// must be outside the checkout: no WAD goes into git, and builds
+// without the property (CI, release-android.yml) stay WAD-free.
+// packaging/android/build-shareware.sh makes that APK.
 
 plugins {
     id 'com.android.application'
@@ -35,7 +42,16 @@ def sourceUrl = providers.gradleProperty('appVersion').isPresent()
     ? "https://github.com/raydelto/raylib_DOOM/tree/v${appVersion}"
     : 'https://github.com/raydelto/raylib_DOOM'
 
+// The source of exactly this build, when it is not a tag (a commit).
+def sourceRef = providers.gradleProperty('sourceRef')
+if (sourceRef.isPresent())
+    sourceUrl = "https://github.com/raydelto/raylib_DOOM/tree/${sourceRef.get()}"
+
 def releaseKeystore = providers.gradleProperty('releaseKeystore')
+
+// DOOM1.WAD of DOOM 1.9 shareware: IWAD, 4,196,020 bytes, episode 1.
+def sharewareSha256 = '1d7d43be501e67d927e415e0b8f3e29c3bf33075e859721816f652a526cac771'
+def bundleWad = providers.gradleProperty('bundleWad')
 
 // The licenses, shown by About / Licenses in the launcher: assets/
 // licenses/<name> for each file.
@@ -43,6 +59,8 @@ abstract class LicenseAssets extends DefaultTask {
     @Input abstract MapProperty<String, String> getNames()
     @InputFiles abstract ConfigurableFileCollection getSources()
     @OutputDirectory abstract DirectoryProperty getOutputDir()
+    // -PbundleWad: the notices say DOOM1.WAD is included.
+    @Input abstract Property<Boolean> getBundledWad()
 
     @TaskAction
     void copy() {
@@ -52,6 +70,43 @@ abstract class LicenseAssets extends DefaultTask {
         names.get().each { from, name ->
             new File(out, name).bytes = new File(from).bytes
         }
+        if (bundledWad.get()) {
+            File notices = new File(out, 'THIRD-PARTY-NOTICES.txt')
+            String text = notices.getText('UTF-8')
+            String noData = 'No game data (IWAD or PWAD) is included: the player supplies their\n' +
+                            'own WAD files. The app is compatible with DOOM WAD files; it is not\n' +
+                            'made or endorsed by id Software, Bethesda or ZeniMax.'
+            if (!text.contains(noData))
+                throw new GradleException("${notices.name}: no \"${noData}\" to replace")
+            notices.setText(text.replace(noData,
+                'This APK includes the shareware DOOM1.WAD (episode 1), unmodified.\n' +
+                'DOOM shareware © id Software. Not affiliated with id Software /\n' +
+                'ZeniMax / Microsoft. DOOM1.WAD is not covered by the GPL or by the\n' +
+                'licenses below. Other WAD files are supplied by the player. The app\n' +
+                'is compatible with DOOM WAD files; it is not made or endorsed by id\n' +
+                'Software, Bethesda or ZeniMax.'), 'UTF-8')
+        }
+    }
+}
+
+// The bundled WAD, -PbundleWad: assets/doom1.wad.
+abstract class BundledWadAsset extends DefaultTask {
+    @InputFile abstract RegularFileProperty getWad()
+    @Input abstract Property<String> getSha256()
+    @OutputDirectory abstract DirectoryProperty getOutputDir()
+
+    @TaskAction
+    void copy() {
+        byte[] bytes = wad.get().asFile.bytes
+        String sum = java.security.MessageDigest.getInstance('SHA-256')
+            .digest(bytes).encodeHex().toString()
+        if (sum != sha256.get())
+            throw new GradleException("${wad.get().asFile}: SHA-256 ${sum}, not the "
+                                      + "shareware DOOM1.WAD (${sha256.get()})")
+        File out = outputDir.get().asFile
+        out.deleteDir()
+        out.mkdirs()
+        new File(out, 'doom1.wad').bytes = bytes
     }
 }
 
@@ -64,8 +119,23 @@ def licenseFiles = [
 
 def licenses = tasks.register('licenseAssets', LicenseAssets) {
     names = licenseFiles
+    bundledWad = bundleWad.isPresent()
     sources.from(licenseFiles.keySet())
     outputDir = layout.buildDirectory.dir('generated/licenses')
+}
+
+def bundledWad = null
+if (bundleWad.isPresent()) {
+    File wad = file(bundleWad.get()).canonicalFile
+    File repo = rootProject.projectDir.parentFile.canonicalFile
+    if (wad.path.startsWith(repo.path + File.separator))
+        throw new GradleException("-PbundleWad=${wad}: keep the WAD outside the "
+                                  + "checkout (${repo}), so it can never be committed")
+    bundledWad = tasks.register('bundledWadAsset', BundledWadAsset) {
+        it.wad = wad
+        it.sha256 = sharewareSha256
+        it.outputDir = layout.buildDirectory.dir('generated/bundledWad')
+    }
 }
 
 android {
@@ -151,6 +221,8 @@ android {
 androidComponents {
     onVariants(selector().all()) { variant ->
         variant.sources.assets.addGeneratedSourceDirectory(licenses) { it.outputDir }
+        if (bundledWad != null)
+            variant.sources.assets.addGeneratedSourceDirectory(bundledWad) { it.outputDir }
     }
 }
 
