@@ -26,6 +26,8 @@
 #ifndef __I_RAYLIB__
 #define __I_RAYLIB__
 
+#include "i_ios.h"
+
 typedef enum
 {
     rl_keydown,
@@ -71,7 +73,7 @@ int RL_GetEvent (rl_event_t* ev);
 // Captures (hides and locks) the mouse pointer.
 void RL_SetMouseGrab (int grab);
 
-#if defined(__ANDROID__) || defined(__EMSCRIPTEN__)
+#if defined(DOOM_TOUCH) || defined(__EMSCRIPTEN__)
 // Gamepad and touch controls held, as of the last RL_PumpEvents,
 // as the controller buttons of i_xr.h. On the web, the touch
 // controls of the page (web/shell.html).

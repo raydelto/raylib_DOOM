@@ -41,6 +41,8 @@ rcsid[] = "$Id: i_main.c,v 1.4 1997/02/03 22:45:10 b1 Exp $";
 #include "i_android.h"
 #endif
 
+#include "i_ios.h"
+
 #ifdef __APPLE__
 #include <stdio.h>
 #include <stdlib.h>
@@ -52,6 +54,9 @@ rcsid[] = "$Id: i_main.c,v 1.4 1997/02/03 22:45:10 b1 Exp $";
 #include <sys/stat.h>
 #include <mach-o/dyld.h>
 #include <CoreFoundation/CoreFoundation.h>
+#ifdef DOOM_IOS
+#include <SDL_main.h>	// renames main to SDL_main; SDL's own main starts UIKit
+#endif
 
 // Started from Finder, the game has "/" as its current directory,
 // no DOOMWADDIR and no terminal, so inside raylibDOOM.app it looks
@@ -118,6 +123,7 @@ static int BundleIsIWAD (const char* path)
     return ok;
 }
 
+#ifndef DOOM_IOS
 static void BundleAlert (const char* text)
 {
     CFStringRef	title;
@@ -132,6 +138,67 @@ static void BundleAlert (const char* text)
 	CFRelease (msg);
 }
 
+#endif	// !DOOM_IOS
+
+#ifdef DOOM_IOS
+// On iOS the app is sandboxed: the IWAD is looked for in the app
+// bundle (the build puts one there), then in the app's Documents
+// folder (reachable from the Files app), which also holds the saved
+// games and settings. A relative -config or -file stays relative to
+// the Documents folder too.
+static void BundleSetup (int argc, char** argv)
+{
+    static char		iwad[PATH_MAX];
+    char		appdir[PATH_MAX];
+    char*		support = bundlesupport;
+    char*		home;
+    char**		args;
+    int			i;
+    CFBundleRef		bundle;
+    CFURLRef		url;
+
+    home = getenv ("HOME");
+    if (!home)
+	return;
+
+    snprintf (support, PATH_MAX, "%s/Documents", home);
+    mkdir (support, 0755);
+
+    appdir[0] = '\0';
+    bundle = CFBundleGetMainBundle ();
+    url = bundle ? CFBundleCopyResourcesDirectoryURL (bundle) : NULL;
+    if (url)
+    {
+	if (!CFURLGetFileSystemRepresentation (url, true, (UInt8*)appdir,
+					       sizeof(appdir)))
+	    appdir[0] = '\0';
+	CFRelease (url);
+    }
+
+    for (i = 1; i < argc; i++)
+	if (!strcasecmp (argv[i], "-iwad"))
+	    return;
+
+    if (!BundleFindIWAD (getenv ("DOOMWADDIR"), iwad)
+	&& !BundleFindIWAD (support, iwad)
+	&& !BundleFindIWAD (appdir, iwad))
+    {
+	fprintf (stderr, "No IWAD found in %s or the app bundle %s\n",
+		 support, appdir);
+	exit (1);
+    }
+
+    printf ("IWAD: %s\n", iwad);
+    args = malloc ((argc + 3) * sizeof(*args));
+    for (i = 0; i < argc; i++)
+	args[i] = argv[i];
+    args[argc] = "-iwad";
+    args[argc+1] = iwad;
+    args[argc+2] = NULL;
+    myargc = argc + 2;
+    myargv = args;
+}
+#else
 static void BundleSetup (int argc, char** argv)
 {
     static char		exe[PATH_MAX];
@@ -223,6 +290,7 @@ static void BundleSetup (int argc, char** argv)
     myargc = argc + 2;
     myargv = args;
 }
+#endif	// DOOM_IOS
 
 //
 // I_BundleEnterDataDir

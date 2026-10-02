@@ -29,8 +29,16 @@
 #include "raylib.h"
 
 #include "i_raylib.h"
-#if defined(DOOM_XR) || defined(__ANDROID__)
+#if defined(DOOM_XR) || defined(DOOM_TOUCH)
 #include "i_xr.h"
+#endif
+
+#ifdef DOOM_IOS
+#include <SDL.h>
+#include <OpenGLES/ES2/gl.h>
+
+// rlgl.h, which this file does not include.
+void rlEnableFramebuffer (unsigned int id);
 #endif
 
 #ifdef __EMSCRIPTEN__
@@ -52,20 +60,80 @@ static void WSL_Init (void);
 static void WSL_Shutdown (void);
 static void ToggleFullscreenWindow (void);
 static void WM_SettleWindowed (void);
-#ifdef __ANDROID__
+#ifdef DOOM_TOUCH
 static void DrawTouchControls (void);
+#endif
+#ifdef DOOM_IOS
+static void WaitForeground (void);
 #endif
 
 // raylib's INFO chatter would drown DOOM's startup log.
 static void QuietRaylib (void)
 {
+#ifdef DOOM_IOS
+    // Its SDL platform warns about GetWindowScaleDPI on every frame.
+    SetTraceLogLevel (LOG_ERROR);
+#else
     SetTraceLogLevel (LOG_WARNING);
+#endif
 }
 
 
 //
 // VIDEO
 //
+
+#ifdef DOOM_IOS
+// iOS kills an app that draws with OpenGL ES in the background
+// (gpus_ReturnNotPermittedKillClient), so once SDL says the app is
+// about to leave the foreground nothing is drawn, and the game waits
+// in WaitForeground. SDL calls the watch from the thread that pumps
+// events, which is the game's: they never run together.
+static volatile int	appactive = 1;
+
+// UIKit's GL view draws into a framebuffer of its own; framebuffer 0,
+// which raylib binds after a render texture, shows nothing on iOS.
+static unsigned int	screenfbo;
+// SDL presents whichever renderbuffer is bound when it swaps, and
+// raylib's render textures leave none bound.
+static unsigned int	screenrb;
+
+static int SDLCALL AppLifecycle (void* data, SDL_Event* event)
+{
+    switch (event->type)
+    {
+      case SDL_APP_WILLENTERBACKGROUND:
+	appactive = 0;
+	break;
+      case SDL_APP_DIDENTERFOREGROUND:
+	appactive = 1;
+	break;
+    }
+    return 0;
+}
+
+int RL_AppActive (void)
+{
+    return appactive;
+}
+
+// Waits, keeping SDL's event loop going, until the app is back, and
+// stops the game's clock meanwhile.
+static void WaitForeground (void)
+{
+    Uint32	start;
+
+    if (appactive)
+	return;
+    start = SDL_GetTicks ();
+    while (!appactive)
+    {
+	SDL_PumpEvents ();
+	SDL_Delay (50);
+    }
+    I_SkipTime ((int)(SDL_GetTicks () - start));
+}
+#endif
 
 static Texture2D	screentex;
 static int		screenwidth;
@@ -86,16 +154,53 @@ void RL_InitVideo (int width, int height, int scale, int fullscreen)
     screenheight = height;
 
     QuietRaylib ();
+#ifdef DOOM_IOS
+    // Not FLAG_WINDOW_HIGHDPI: raylib's SDL platform has no DPI scale
+    // (GetWindowScaleDPI), so it would draw into the lower left of
+    // the Retina drawable. In points, iOS scales the 1x drawable
+    // up itself; the frame is 320x200 smooth-scaled anyway.
     SetConfigFlags (FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT);
+    // The screen stays on, and the app finds out when it is sent
+    // to the background (see WaitForeground).
+    SDL_DisableScreenSaver ();
+    SDL_AddEventWatch (AppLifecycle, NULL);
+#else
+    SetConfigFlags (FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT);
+#endif
 
     // DOOM's 320x200 was shown on 4:3 monitors with tall pixels.
-#ifdef __ANDROID__
+#ifdef DOOM_TOUCH
     // The whole display (0x0), so RL_Present letterboxes to 4:3
     // itself and the touch controls can use the side bars; raylib
     // would letterbox a 4:3 window without them.
+#ifdef DOOM_IOS
+    // raylib's SDL platform keeps 0x0 as the size, so say it: the
+    // display in points, landscape (the app only has landscape).
+    {
+	SDL_Rect	bounds = { 0, 0, 0, 0 };
+
+	// raylib starts SDL's video itself, but only inside InitWindow.
+	SDL_InitSubSystem (SDL_INIT_VIDEO);
+	SDL_GetDisplayBounds (0, &bounds);
+	InitWindow (bounds.w > bounds.h ? bounds.w : bounds.h,
+		    bounds.w > bounds.h ? bounds.h : bounds.w, WINDOWTITLE);
+    }
+#else
     InitWindow (0, 0, WINDOWTITLE);
+#endif
 #else
     InitWindow (width*scale, (width*3/4)*scale, WINDOWTITLE);
+#endif
+#ifdef DOOM_IOS
+    {
+	GLint	fbo = 0;
+
+	glGetIntegerv (GL_FRAMEBUFFER_BINDING, &fbo);
+	screenfbo = (unsigned int)fbo;
+	glGetFramebufferAttachmentParameteriv (GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+					       GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &fbo);
+	screenrb = (unsigned int)fbo;
+    }
 #endif
     SetWindowMinSize (width, width*3/4);
 
@@ -183,6 +288,10 @@ void RL_Present (const unsigned char* rgba)
     Rectangle	big;
     Rectangle	dst;
 
+#ifdef DOOM_IOS
+    WaitForeground ();
+#endif
+
     UpdateTexture (screentex, rgba);
 
 #ifdef DOOM_XR
@@ -228,6 +337,9 @@ void RL_Present (const unsigned char* rgba)
     BeginTextureMode (prescaled);
     DrawTexturePro (screentex, src, big, (Vector2) { 0, 0 }, 0.0f, WHITE);
     EndTextureMode ();
+#ifdef DOOM_IOS
+    rlEnableFramebuffer (screenfbo);
+#endif
 
     // Render textures are stored upside down.
     big.height = -big.height;
@@ -236,8 +348,11 @@ void RL_Present (const unsigned char* rgba)
     BeginDrawing ();
     ClearBackground (BLACK);
     DrawTexturePro (prescaled.texture, big, dst, (Vector2) { 0, 0 }, 0.0f, WHITE);
-#ifdef __ANDROID__
+#ifdef DOOM_TOUCH
     DrawTouchControls ();
+#endif
+#ifdef DOOM_IOS
+    glBindRenderbuffer (GL_RENDERBUFFER, screenrb);
 #endif
     EndDrawing ();
 }
@@ -428,6 +543,9 @@ void RL_PumpEvents (void)
     if (!IsWindowReady ())
 	return;
 
+#ifdef DOOM_IOS
+    WaitForeground ();
+#endif
 #ifdef __APPLE__
     if (WindowShouldClose ())
 	quitrequested = 1;
@@ -508,7 +626,7 @@ void RL_SetMouseGrab (int grab)
 {
     if (grab && !IsWindowFocused ())
 	grab = 0;
-#ifdef __ANDROID__
+#ifdef DOOM_TOUCH
     // raylib reports the first finger as the mouse; the touch
     // controls have it instead.
     grab = 0;
@@ -541,7 +659,7 @@ void RL_SetMouseGrab (int grab)
 
 
 
-#ifdef __ANDROID__
+#ifdef DOOM_TOUCH
 //
 // GAMEPAD AND TOUCH CONTROLS
 //
@@ -590,11 +708,42 @@ static int		touchshown = -1;	// -1: not decided yet
 static unsigned		touchheld;
 
 
+#ifdef DOOM_IOS
+// Insets for the rounded corners, the Dynamic Island and the home
+// indicator, in raylib's screen units. (SDL's usable display bounds
+// do not report them.)
+static void SafeInsets (float* left, float* top, float* right, float* bottom)
+{
+    SDL_Rect	full;
+    float	sx = 1;
+    float	sy = 1;
+
+    // The window is in points, and so are the insets.
+    if (!SDL_GetDisplayBounds (0, &full) && full.w > 0 && full.h > 0)
+    {
+	sx = (float)GetScreenWidth () / full.w;
+	sy = (float)GetScreenHeight () / full.h;
+    }
+    I_IOSSafeInsets (left, top, right, bottom);
+    *left *= sx;
+    *right *= sx;
+    *top *= sy;
+    *bottom *= sy;
+}
+#endif
+
 static Rectangle TouchRect (const touchbutton_t* b)
 {
     float	u = GetScreenHeight () / 7.0f;
-    float	x = b->x >= 0 ? b->x*u : GetScreenWidth () + b->x*u;
-    float	y = b->y >= 0 ? b->y*u : GetScreenHeight () + b->y*u;
+    float	l = 0, t = 0, r = 0, d = 0;
+    float	x;
+    float	y;
+
+#ifdef DOOM_IOS
+    SafeInsets (&l, &t, &r, &d);
+#endif
+    x = b->x >= 0 ? l + b->x*u : GetScreenWidth () - r + b->x*u;
+    y = b->y >= 0 ? t + b->y*u : GetScreenHeight () - d + b->y*u;
 
     return (Rectangle) { x, y, b->w*u, b->h*u };
 }
@@ -607,6 +756,39 @@ static unsigned TouchButtons (void)
     int		i;
     int		j;
 
+#ifdef DOOM_IOS
+    // raylib's SDL platform reports the first touch point at the mouse
+    // position on every poll, so a finger held still on a button is
+    // lost after one frame; SDL's own finger list is not.
+    if (touchshown < 0)
+	touchshown = 1;
+    {
+	int	d;
+	int	n;
+
+	for (d = 0; d < SDL_GetNumTouchDevices (); d++)
+	{
+	    SDL_TouchID	id = SDL_GetTouchDevice (d);
+
+	    n = SDL_GetNumTouchFingers (id);
+	    if (n > 0)
+		touchshown = 1;
+	    for (i = 0; i < n && touchshown; i++)
+	    {
+		SDL_Finger*	f = SDL_GetTouchFinger (id, i);
+		Vector2		pos;
+
+		if (!f)
+		    continue;
+		pos = (Vector2) { f->x * GetScreenWidth (), f->y * GetScreenHeight () };
+		for (j = 0; j < NUMTOUCHBUTTONS; j++)
+		    if (CheckCollisionPointRec (pos, TouchRect (&touchbuttons[j])))
+			held |= touchbuttons[j].button;
+	    }
+	}
+    }
+    return held;
+#else
     if (touchshown < 0)
 	touchshown = I_AndroidHasTouchscreen ();
     count = GetTouchPointCount ();
@@ -624,6 +806,7 @@ static unsigned TouchButtons (void)
 		held |= touchbuttons[j].button;
     }
     return held;
+#endif
 }
 
 
@@ -777,7 +960,7 @@ unsigned RL_PadButtons (void)
 // A native Windows build has none of this to work around.
 //
 
-#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__) && !defined(DOOM_IOS)
 
 typedef struct GLFWwindow GLFWwindow;
 typedef struct GLFWcursor GLFWcursor;
@@ -1289,6 +1472,9 @@ int RL_InitAudio (void)
     if (!IsAudioDeviceReady ())
 	return 0;
 
+#ifdef DOOM_IOS
+    I_IOSAudioSession ();
+#endif
     audioready = 1;
     return 1;
 }
