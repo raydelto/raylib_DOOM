@@ -38,8 +38,45 @@ elseif(RAYLIB_DOOM_ANDROID_XR)
   message(FATAL_ERROR "RAYLIB_DOOM_ANDROID_XR needs RAYLIB_DOOM_ANDROID")
 endif()
 
+# iOS app (ios/): cmake -B build-ios -G Xcode -DCMAKE_SYSTEM_NAME=iOS
+# -DRAYLIB_DOOM_IOS=ON -DRAYLIB_DOOM_IOS_IWAD=/path/to/freedoom1.wad
+# (see ios/README.md). raylib runs on SDL2's UIKit and OpenGL ES 2.
+option(RAYLIB_DOOM_IOS "Build the iOS app (needs CMAKE_SYSTEM_NAME=iOS and -G Xcode)" OFF)
+set(RAYLIB_DOOM_IOS_IWAD "" CACHE FILEPATH "IWAD to put in the iOS app (Freedoom or the shareware DOOM1.WAD)")
+set(RAYLIB_DOOM_IOS_BUNDLE_ID "com.raydelto.raylibdoom" CACHE STRING "iOS bundle identifier")
+set(RAYLIB_DOOM_IOS_TEAM "" CACHE STRING "Development team ID for signing the iOS app")
+if(RAYLIB_DOOM_IOS)
+  if(NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    message(FATAL_ERROR "RAYLIB_DOOM_IOS needs -DCMAKE_SYSTEM_NAME=iOS (and -G Xcode)")
+  endif()
+  cmake_minimum_required(VERSION 3.24)
+  include(FetchContent)
+  set(PLATFORM SDL CACHE STRING "raylib platform" FORCE)
+  set(OPENGL_VERSION "ES 2.0" CACHE STRING "raylib OpenGL version" FORCE)
+  set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+  # raylib's SDL platform looks for SDL2 with find_package; this
+  # build supplies it, as a static library.
+  set(SDL_SHARED OFF CACHE BOOL "" FORCE)
+  set(SDL_STATIC ON CACHE BOOL "" FORCE)
+  set(SDL_TEST OFF CACHE BOOL "" FORCE)
+  FetchContent_Declare(
+    SDL2
+    GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
+    GIT_TAG release-2.30.x
+    GIT_SHALLOW TRUE
+    OVERRIDE_FIND_PACKAGE)
+  FetchContent_MakeAvailable(SDL2)
+  if(NOT TARGET SDL2::SDL2)
+    add_library(SDL2::SDL2 ALIAS SDL2-static)
+  endif()
+endif()
+
 # Use an installed raylib if there is one, otherwise build it.
-find_package(raylib 5.0 QUIET)
+if(RAYLIB_DOOM_IOS)
+  set(raylib_FOUND FALSE)
+else()
+  find_package(raylib 5.0 QUIET)
+endif()
 if(NOT raylib_FOUND)
   include(FetchContent)
   set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
@@ -50,6 +87,13 @@ if(NOT raylib_FOUND)
     GIT_TAG 5.5
     GIT_SHALLOW TRUE)
   FetchContent_MakeAvailable(raylib)
+  if(RAYLIB_DOOM_IOS)
+    # raudio.c's miniaudio includes Objective-C headers on iOS, so
+    # it has to be compiled as Objective-C.
+    set_source_files_properties(${raylib_SOURCE_DIR}/src/raudio.c
+      TARGET_DIRECTORY raylib PROPERTIES
+      XCODE_EXPLICIT_FILE_TYPE sourcecode.c.objc)
+  endif()
 endif()
 
 set(DOOM_DIR ${CMAKE_CURRENT_SOURCE_DIR}/linuxdoom-1.10)
@@ -82,6 +126,34 @@ if(RAYLIB_DOOM_ANDROID)
     target_compile_definitions(raylibdoom PRIVATE DOOM_XR)
     target_link_libraries(raylibdoom PRIVATE OpenXR::openxr_loader EGL GLESv3)
   endif()
+elseif(RAYLIB_DOOM_IOS)
+  set(IOS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/ios)
+  add_executable(raylibdoom MACOSX_BUNDLE ${DOOM_SOURCES} ${DOOM_DIR}/i_ios.m)
+  if(RAYLIB_DOOM_IOS_IWAD)
+    set_source_files_properties(${RAYLIB_DOOM_IOS_IWAD} PROPERTIES
+      MACOSX_PACKAGE_LOCATION "")
+    target_sources(raylibdoom PRIVATE ${RAYLIB_DOOM_IOS_IWAD})
+  else()
+    message(WARNING "No -DRAYLIB_DOOM_IOS_IWAD: the app will look for an IWAD in its Documents folder")
+  endif()
+  set_target_properties(raylibdoom PROPERTIES
+    OUTPUT_NAME raylibDOOM
+    MACOSX_BUNDLE_INFO_PLIST ${IOS_DIR}/Info.plist.in
+    MACOSX_BUNDLE_GUI_IDENTIFIER ${RAYLIB_DOOM_IOS_BUNDLE_ID}
+    MACOSX_BUNDLE_BUNDLE_NAME raylibDOOM
+    MACOSX_BUNDLE_BUNDLE_VERSION 1
+    MACOSX_BUNDLE_SHORT_VERSION_STRING 1.0
+    XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER ${RAYLIB_DOOM_IOS_BUNDLE_ID}
+    XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1"
+    XCODE_ATTRIBUTE_IPHONEOS_DEPLOYMENT_TARGET "15.0"
+    XCODE_ATTRIBUTE_CODE_SIGN_STYLE Automatic
+    XCODE_ATTRIBUTE_DEVELOPMENT_TEAM "${RAYLIB_DOOM_IOS_TEAM}"
+    XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY "Apple Development"
+    XCODE_ATTRIBUTE_ENABLE_BITCODE NO
+    XCODE_ATTRIBUTE_CLANG_ENABLE_OBJC_ARC YES)
+  target_link_libraries(raylibdoom PRIVATE SDL2::SDL2main
+    "-framework AVFoundation" "-framework CoreFoundation"
+    "-framework UIKit" "-framework OpenGLES")
 else()
   add_executable(raylibdoom ${DOOM_SOURCES})
 endif()
@@ -91,7 +163,7 @@ if(WIN32)
   target_link_libraries(raylibdoom PRIVATE ws2_32)
   target_sources(raylibdoom PRIVATE ${DOOM_DIR}/i_win32.c)
 endif()
-if(APPLE)
+if(APPLE AND NOT RAYLIB_DOOM_IOS)
   # i_main.c shows a dialog when raylibDOOM.app finds no IWAD.
   target_link_libraries(raylibdoom PRIVATE "-framework CoreFoundation")
 endif()
@@ -123,7 +195,7 @@ endif()
 # Parser regression tests: cmake --build build && ctest --test-dir build
 # They need the host's sanitizers, so the browser and Android
 # builds have none.
-if(EMSCRIPTEN OR RAYLIB_DOOM_ANDROID)
+if(EMSCRIPTEN OR RAYLIB_DOOM_ANDROID OR RAYLIB_DOOM_IOS)
   return()
 endif()
 enable_testing()

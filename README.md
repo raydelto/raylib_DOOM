@@ -45,6 +45,12 @@ Inside `raylibDOOM.app` the game looks for its IWAD in `$DOOMWADDIR`,
 app, saves games to that Application Support folder, and logs to
 `~/Library/Logs/raylibDOOM.log`; see `packaging/macos/README.txt`.
 
+### iOS
+
+An iPhone app (landscape, touch buttons, optional gamepad) is built through
+CMake's Xcode generator; see [ios/README.md](ios/README.md) for the simulator
+and device steps.
+
 ### Windows
 
 The Windows x64 release, `raylibdoom-<version>-windows-x64.zip`, is a

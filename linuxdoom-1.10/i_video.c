@@ -40,7 +40,7 @@ rcsid[] = "$Id: i_x.c,v 1.6 1997/02/03 22:45:10 b1 Exp $";
 #include "doomdef.h"
 
 #include "i_raylib.h"
-#if defined(DOOM_XR) || defined(__ANDROID__) || defined(__EMSCRIPTEN__)
+#if defined(DOOM_XR) || defined(DOOM_TOUCH) || defined(__EMSCRIPTEN__)
 #include "i_xr.h"
 #endif
 
@@ -53,7 +53,7 @@ rcsid[] = "$Id: i_x.c,v 1.6 1997/02/03 22:45:10 b1 Exp $";
 extern int	usemouse;
 
 
-#if defined(DOOM_XR) || defined(__ANDROID__) || defined(__EMSCRIPTEN__)
+#if defined(DOOM_XR) || defined(DOOM_TOUCH) || defined(__EMSCRIPTEN__)
 //
 // Headset controllers, and on Android the gamepad and the touch
 // controls, which report the same buttons (RL_PadButtons), as do
@@ -257,7 +257,7 @@ static void I_PostXRButtons (void)
 #ifdef DOOM_XR
     now |= XR_Buttons ();
 #endif
-#if defined(__ANDROID__) || defined(__EMSCRIPTEN__)
+#if defined(DOOM_TOUCH) || defined(__EMSCRIPTEN__)
     now |= RL_PadButtons ();
 #endif
     for (i = 0; i < XR_NUMBUTTONS; i++)
@@ -415,7 +415,7 @@ void I_StartTic (void)
     if (!XR_Update ())
 	I_Quit ();
 #endif
-#if defined(DOOM_XR) || defined(__ANDROID__) || defined(__EMSCRIPTEN__)
+#if defined(DOOM_XR) || defined(DOOM_TOUCH) || defined(__EMSCRIPTEN__)
     I_PostXRButtons ();
 #endif
 

@@ -52,6 +52,7 @@ rcsid[] = "$Id: m_bbox.c,v 1.1 1997/02/03 22:45:10 b1 Exp $";
 #ifdef __ANDROID__
 #include "i_android.h"
 #endif
+#include "i_ios.h"
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
@@ -103,15 +104,31 @@ byte* I_ZoneBase (int*	size)
 // several times a minute. Time going backwards makes the screen
 // wipe's tic count negative and hangs it, so use the monotonic
 // clock instead of gettimeofday.
+#ifdef DOOM_IOS
+// Milliseconds the app spent in the background.
+static int	skippedms;
+
+void I_SkipTime (int ms)
+{
+    skippedms += ms;
+}
+#endif
+
 int  I_GetTime (void)
 {
     struct timespec	tp;
     static time_t	basetime=0;
+    long long		usec;
 
     clock_gettime(CLOCK_MONOTONIC, &tp);
     if (!basetime)
 	basetime = tp.tv_sec;
-    return (int)((tp.tv_sec-basetime)*TICRATE + tp.tv_nsec/1000*TICRATE/1000000);
+    usec = (long long)(tp.tv_sec-basetime)*1000000 + tp.tv_nsec/1000;
+#ifdef DOOM_IOS
+    // Otherwise the game would run the missed tics at once on return.
+    usec -= (long long)skippedms*1000;
+#endif
+    return (int)(usec*TICRATE/1000000);
 }
 #else
 int  I_GetTime (void)
