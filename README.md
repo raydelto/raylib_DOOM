@@ -20,8 +20,14 @@ cmake -B build
 cmake --build build -j
 ```
 
-CMake uses an installed raylib 5.x if it finds one, and otherwise
-downloads and builds raylib 5.5.
+CMake uses an installed raylib 5.x or 6.x if it finds one, and
+otherwise downloads and builds raylib 5.5. `-DRAYLIB_DOOM_FETCH_RAYLIB=OFF`
+turns the download off (a missing raylib is then an error), and
+`-DFETCHCONTENT_SOURCE_DIR_RAYLIB=DIR` builds the raylib source in
+`DIR` instead. `cmake --install build --component raylibdoom` installs
+the game, its menu entry, icon, AppStream metadata and manual page
+(`-DRAYLIB_DOOM_INSTALL_BINDIR=games` puts the game in `games/`, as
+Debian does).
 
 The original Makefile also still works if raylib is installed with
 pkg-config support:
@@ -89,6 +95,23 @@ tag's release. `sudo apt install ./raylibdoom_*.deb` installs
 shareware DOOM1.WAD in `/usr/share/raylibdoom` (next to the binary in
 the `.tar.gz`); `sudo apt install freedoom` adds free IWADs it finds
 and prefers over the shareware one.
+
+### Debian and Ubuntu archive packages
+
+`debian/` is the source package meant for Debian unstable (and from
+there Ubuntu): it builds against the system `libraylib-dev`, has no
+network access, and leaves out the shareware WAD. Instead it
+recommends `freedoom | doom-wad`, so `apt install raylibdoom` brings
+Freedoom and `apt install raylibdoom doom-wad-shareware` (Debian
+non-free, Ubuntu multiverse) gets the shareware DOOM, which the game
+prefers when both are installed. The orig tarball is the GitHub tag's,
+repacked by `uscan` without the files `debian/copyright` lists under
+`Files-Excluded`, hence the `+ds` version.
+
+`packaging/ppa/make-source.sh SERIES ORIG_TARBALL OUT_DIR` makes the
+same package for a Launchpad PPA on Ubuntu releases that have no
+raylib 5.5+ (jammy, noble, resolute), with raylib 5.5 built in from a
+second orig tarball; sign it with `debsign` and upload it with `dput`.
 
 ### Arch Linux and Omarchy
 

@@ -1,0 +1,37 @@
+Source: raylibdoom
+Section: games
+Maintainer: Debian Games Team <pkg-games-devel@lists.alioth.debian.org>
+Uploaders: Raydelto Hernandez <raydelto@gmail.com>
+Build-Depends:
+ debhelper-compat (= 13),
+ cmake,
+ libraylib-dev (>= 5.5),
+Standards-Version: 4.7.4
+Homepage: https://github.com/raydelto/raylib_DOOM
+Vcs-Browser: https://salsa.debian.org/games-team/raylibdoom
+Vcs-Git: https://salsa.debian.org/games-team/raylibdoom.git
+
+Package: raylibdoom
+Architecture: amd64 arm64 armel armhf i386 loong64 mips64el ppc64el riscv64
+Depends:
+ ${misc:Depends},
+ ${shlibs:Depends},
+Recommends:
+ freedoom | doom-wad,
+Suggests:
+ game-data-packager,
+Provides:
+ doom-engine,
+Description: DOOM engine from the 1997 Linux source release, on raylib
+ raylibdoom is id Software's 1997 Linux DOOM source release
+ (linuxdoom-1.10), ported from X11 and OSS to the raylib library and
+ made to run on 64-bit systems. The original software renderer is kept:
+ it draws the 320x200 paletted picture, which raylib shows scaled to
+ 4:3, with sound effects and OPL3-emulated music. It also reads
+ UMAPINFO, so episodes such as SIGIL show up in the menus.
+ .
+ The game needs game data (an IWAD). The freedoom package, installed by
+ default, provides free game data. The doom-wad-shareware package
+ provides the shareware episode of DOOM and is used instead when both
+ are installed. game-data-packager can package the data of DOOM,
+ The Ultimate DOOM or DOOM II owned by the user.

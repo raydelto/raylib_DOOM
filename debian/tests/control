@@ -1,0 +1,8 @@
+Tests: freedoom-timedemo
+Depends:
+ @,
+ freedoom,
+ libgl1-mesa-dri,
+ xauth,
+ xvfb,
+Restrictions: allow-stderr

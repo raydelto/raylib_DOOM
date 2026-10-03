@@ -39,7 +39,19 @@ elseif(RAYLIB_DOOM_ANDROID_XR)
 endif()
 
 # Use an installed raylib if there is one, otherwise build it.
-find_package(raylib 5.0 QUIET)
+# Distribution builds have no network: they turn the download off
+# (-DRAYLIB_DOOM_FETCH_RAYLIB=OFF), so a missing raylib is an error.
+# FETCHCONTENT_SOURCE_DIR_RAYLIB=DIR builds the raylib source in DIR
+# without downloading it.
+option(RAYLIB_DOOM_FETCH_RAYLIB
+  "Download and build raylib when no installed one is found" ON)
+if(FETCHCONTENT_SOURCE_DIR_RAYLIB)
+  # Build that source, even when raylib is installed.
+elseif(RAYLIB_DOOM_FETCH_RAYLIB)
+  find_package(raylib 5.0 QUIET)
+else()
+  find_package(raylib 5.0 REQUIRED)
+endif()
 if(NOT raylib_FOUND)
   include(FetchContent)
   set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
@@ -99,15 +111,14 @@ if(EMSCRIPTEN)
   include(web/web.cmake)
 endif()
 
-# Plain char is unsigned on Linux arm/aarch64, but the code assumes it
-# is signed, as on x86: ticcmd_t's forwardmove and sidemove are char,
-# so backward and left moves came out as big forward/right ones and
-# demos desynced. x86 and Apple/Windows arm64 already have a signed
-# char, so this changes only builds where it was unsigned.
-# d_ticcmd.h refuses to compile without it.
+# Plain char is unsigned on Linux arm/aarch64, ppc64el, riscv64 and
+# s390x, but the code assumes it is signed, as on x86: ticcmd_t's
+# forwardmove and sidemove are char, so backward and left moves came
+# out as big forward/right ones and demos desynced. Where char is
+# already signed this changes nothing. d_ticcmd.h refuses to compile
+# without it.
 set(DOOM_SIGNED_CHAR "")
-if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang"
-   AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64|arm)")
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   set(DOOM_SIGNED_CHAR -fsigned-char)
 endif()
 
@@ -120,19 +131,45 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(raylibdoom PRIVATE ${DOOM_SIGNED_CHAR})
 endif()
 
+# cmake --install: the game, its desktop entry, icon, AppStream
+# metadata and manual page, for distribution packages. Debian puts
+# the game in /usr/games (-DRAYLIB_DOOM_INSTALL_BINDIR=games). With
+# a raylib built here, --component raylibdoom leaves raylib's own
+# library and headers out.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT RAYLIB_DOOM_ANDROID)
+  include(GNUInstallDirs)
+  set(RAYLIB_DOOM_INSTALL_BINDIR ${CMAKE_INSTALL_BINDIR} CACHE STRING
+    "Where cmake --install puts raylibdoom, relative to the prefix")
+  set(LINUX_PKG ${CMAKE_CURRENT_SOURCE_DIR}/packaging/linux)
+  install(TARGETS raylibdoom DESTINATION ${RAYLIB_DOOM_INSTALL_BINDIR}
+    COMPONENT raylibdoom)
+  install(FILES ${LINUX_PKG}/raylibdoom.desktop
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/applications COMPONENT raylibdoom)
+  install(FILES ${LINUX_PKG}/raylibdoom.svg
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps COMPONENT raylibdoom)
+  install(FILES ${LINUX_PKG}/io.github.raydelto.raylibdoom.metainfo.xml
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/metainfo COMPONENT raylibdoom)
+  install(FILES ${LINUX_PKG}/raylibdoom.6
+    DESTINATION ${CMAKE_INSTALL_MANDIR}/man6 COMPONENT raylibdoom)
+endif()
+
 # Parser regression tests: cmake --build build && ctest --test-dir build
-# They need the host's sanitizers, so the browser and Android
-# builds have none.
+# They use the host's sanitizers where it has them; some Debian
+# architectures don't, so -DRAYLIB_DOOM_TEST_SANITIZERS=OFF builds
+# them plain. The browser and Android builds have none.
 if(EMSCRIPTEN OR RAYLIB_DOOM_ANDROID)
   return()
 endif()
+option(RAYLIB_DOOM_TEST_SANITIZERS
+  "Build the tests with -fsanitize=address,undefined" ON)
 enable_testing()
 add_executable(midi_register_test tests/midi_register_test.c ${DOOM_DIR}/opl3.c)
 target_include_directories(midi_register_test PRIVATE ${DOOM_DIR})
 target_compile_definitions(midi_register_test PRIVATE NORMALUNIX LINUX)
 target_link_libraries(midi_register_test PRIVATE m)
 target_compile_options(midi_register_test PRIVATE ${DOOM_SIGNED_CHAR})
-if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang" AND NOT WIN32)
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang" AND NOT WIN32
+   AND RAYLIB_DOOM_TEST_SANITIZERS)
   # No -fwrapv here: it would hide the signed-shift overflows that
   # the sanitizer is meant to catch.
   target_compile_options(midi_register_test PRIVATE
@@ -143,7 +180,8 @@ add_test(NAME midi_register COMMAND midi_register_test)
 
 add_executable(umapinfo_test tests/umapinfo_test.c ${DOOM_DIR}/u_mapinfo.c)
 target_include_directories(umapinfo_test PRIVATE ${DOOM_DIR})
-if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang" AND NOT WIN32)
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang" AND NOT WIN32
+   AND RAYLIB_DOOM_TEST_SANITIZERS)
   target_compile_options(umapinfo_test PRIVATE
     -fsanitize=address,undefined -fno-sanitize-recover=undefined)
   target_link_options(umapinfo_test PRIVATE -fsanitize=address,undefined)
