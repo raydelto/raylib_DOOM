@@ -41,6 +41,10 @@
 #include "i_android.h"
 #endif
 
+#ifdef __APPLE__
+#include "i_macos.h"
+#endif
+
 
 #define WINDOWTITLE	"DOOM"
 
@@ -110,6 +114,9 @@ void RL_InitVideo (int width, int height, int scale, int fullscreen)
     UnloadImage (blank);
     SetTextureFilter (screentex, TEXTURE_FILTER_POINT);
 
+#ifdef __APPLE__
+    MAC_SetSpacesGuard (1);
+#endif
     WSL_Init ();
 }
 
@@ -120,6 +127,9 @@ void RL_ShutdownVideo (void)
 	return;
 
     WSL_Shutdown ();
+#ifdef __APPLE__
+    MAC_SetSpacesGuard (0);
+#endif
 #ifdef DOOM_XR
     // While raylib's GL context, which the session uses, is alive.
     XR_Shutdown ();
@@ -431,6 +441,7 @@ void RL_PumpEvents (void)
 #ifdef __APPLE__
     if (WindowShouldClose ())
 	quitrequested = 1;
+    MAC_SetFocused (IsWindowFocused ());
 #endif
 
     WM_SettleWindowed ();
