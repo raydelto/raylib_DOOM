@@ -83,6 +83,7 @@ void MAC_SetSpacesGuard (int on)
 	CFRunLoopRemoveSource (CFRunLoopGetMain (), source,
 			       kCFRunLoopCommonModes);
 	CFRelease (source);
+	focused = 0;
 	CFRelease (tap);
 	source = NULL;
 	tap = NULL;
