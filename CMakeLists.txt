@@ -93,10 +93,7 @@ if(WIN32)
 endif()
 if(APPLE)
   # i_main.c shows a dialog when raylibDOOM.app finds no IWAD.
-  target_link_libraries(raylibdoom PRIVATE "-framework CoreFoundation"
-    "-framework ApplicationServices")
-  # i_macos.c: an event tap that keeps Ctrl+arrows from switching Spaces.
-  target_sources(raylibdoom PRIVATE ${DOOM_DIR}/i_macos.c)
+  target_link_libraries(raylibdoom PRIVATE "-framework CoreFoundation")
 endif()
 if(EMSCRIPTEN)
   include(web/web.cmake)
