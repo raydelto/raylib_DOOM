@@ -1,0 +1,7 @@
+Version: 5
+
+Template: Github
+Owner: raydelto
+Project: raylib_DOOM
+Repacksuffix: +ds
+Dversion-mangle: auto

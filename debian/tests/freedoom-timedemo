@@ -1,0 +1,19 @@
+#!/bin/sh
+# Plays Freedoom's first demo as fast as it can, on a virtual X
+# server, with the IWAD the game finds by itself in
+# /usr/share/games/doom. The engine ends a -timedemo run with
+# "timed N gametics in M realtics" and a non-zero exit status.
+set -u
+
+export HOME="${AUTOPKGTEST_TMP:-$(mktemp -d)}"
+cd "$HOME"
+
+out=$(timeout 300 xvfb-run -a -s "-screen 0 1024x768x24" \
+      /usr/games/raylibdoom -nosound -timedemo demo1 2>&1)
+echo "$out"
+
+echo "$out" | grep -q "freedoom2.wad" ||
+    { echo "FAIL: Freedoom's IWAD was not picked" >&2; exit 1; }
+echo "$out" | grep -Eq "timed [0-9]+ gametics" ||
+    { echo "FAIL: the demo did not finish" >&2; exit 1; }
+echo "PASS"

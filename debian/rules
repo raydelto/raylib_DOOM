@@ -1,0 +1,14 @@
+#!/usr/bin/make -f
+
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+
+%:
+	dh $@
+
+# No network: an installed raylib or nothing. The sanitizers the
+# upstream tests use don't exist on every architecture.
+override_dh_auto_configure:
+	dh_auto_configure -- \
+	   -DRAYLIB_DOOM_FETCH_RAYLIB=OFF \
+	   -DRAYLIB_DOOM_TEST_SANITIZERS=OFF \
+	   -DRAYLIB_DOOM_INSTALL_BINDIR=games
