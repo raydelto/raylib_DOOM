@@ -41,7 +41,10 @@ The app is ad-hoc signed. It needs no special permissions.
 Game data
 ---------
 
-No game data is included. DOOM needs an IWAD, which is one of:
+Releases that say "shareware" include the free shareware DOOM1.WAD
+inside the app; it is used only when you have no other IWAD in the
+places below. Otherwise no game data is included. DOOM needs an IWAD,
+which is one of:
 
   doom1.wad      the shareware episode, free to share
   doom.wad       registered DOOM, doomu.wad for The Ultimate DOOM

@@ -8,6 +8,10 @@
 # there, and the raylib and GLFW licenses from the raylib source
 # FetchContent put in it.
 #
+# When DOOM1_WAD names the shareware DOOM1.WAD, it is put inside the
+# app (Contents/Resources), where the app looks last, after the
+# user's own IWADs.
+#
 # Signing is ad-hoc (codesign -s -) unless MACOS_SIGN_IDENTITY names a
 # Developer ID Application identity in the keychain. The app and dmg
 # are then signed with it, with the hardened runtime and a timestamp,
@@ -84,6 +88,10 @@ for dir in "$licenses" "$root"; do
     cp "$raylib/src/external/glfw/LICENSE.md" "$dir/glfw-LICENSE.md"
     cp "$here/THIRD-PARTY-NOTICES.txt" "$dir/THIRD-PARTY-NOTICES.txt"
 done
+if [ -n "${DOOM1_WAD:-}" ]; then
+    [ -f "$DOOM1_WAD" ] || { echo "missing $DOOM1_WAD" >&2; exit 1; }
+    cp "$DOOM1_WAD" "$contents/Resources/DOOM1.WAD"
+fi
 cp "$here/README.txt" "$contents/Resources/README.txt"
 cp "$here/README.txt" "$root/README.txt"
 ln -s /Applications "$root/Applications"

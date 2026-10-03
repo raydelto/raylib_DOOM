@@ -136,6 +136,7 @@ static void BundleSetup (int argc, char** argv)
 {
     static char		exe[PATH_MAX];
     static char		appdir[PATH_MAX];
+    static char		resdir[PATH_MAX];
     char*		support = bundlesupport;
     static char		iwad[PATH_MAX];
     static char		text[4*PATH_MAX];
@@ -159,6 +160,10 @@ static void BundleSetup (int argc, char** argv)
     app[4] = '\0';
     snprintf (appdir, sizeof(appdir), "%s", exe);
     *strrchr (appdir, '/') = '\0';
+
+    // An IWAD shipped inside the app (the shareware release); a
+    // user's own IWAD, found first, wins over it.
+    snprintf (resdir, sizeof(resdir), "%s/Contents/Resources", exe);
 
     // Created now, but only entered once the WADs are open (see
     // I_BundleEnterDataDir), so command-line paths and DOOMWADDIR
@@ -198,7 +203,8 @@ static void BundleSetup (int argc, char** argv)
     wadenv = getenv ("DOOMWADDIR");
     if (!BundleFindIWAD (wadenv, iwad)
 	&& !BundleFindIWAD (support, iwad)
-	&& !BundleFindIWAD (appdir, iwad))
+	&& !BundleFindIWAD (appdir, iwad)
+	&& !BundleFindIWAD (resdir, iwad))
     {
 	snprintf (text, sizeof(text),
 		  "Put an IWAD, such as the shareware DOOM1.WAD or Freedoom's "
