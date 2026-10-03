@@ -42,8 +42,10 @@ if [ -e "$bundled" ]; then
     echo "== bundled shareware DOOM1.WAD"
     echo "1d7d43be501e67d927e415e0b8f3e29c3bf33075e859721816f652a526cac771  $bundled" |
         sha256sum -c
-    test -f /usr/share/doc/raylibdoom/DOOM1-NOTICE.txt
-    grep -q "Not affiliated with id Software" /usr/share/doc/raylibdoom/DOOM1-NOTICE.txt
+    # Minimal images (Docker's ubuntu) drop /usr/share/doc but for
+    # copyright, which carries the notice too.
+    dpkg-deb -c "$deb" | grep -q ' ./usr/share/doc/raylibdoom/DOOM1-NOTICE.txt$'
+    grep -q "Not affiliated with id Software" /usr/share/doc/raylibdoom/copyright
     mv "$bundled" "$bundled.aside"
 fi
 
