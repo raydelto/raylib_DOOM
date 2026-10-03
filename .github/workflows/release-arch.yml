@@ -10,6 +10,11 @@ name: release-arch
 # an existing draft release: then it builds that tag and attaches the
 # package to that draft. Published releases are never changed, and no
 # tag is ever created.
+#
+# A tag's package ships the shareware DOOM1.WAD in /usr/share/raylibdoom
+# (downloaded at build time and checked by its SHA-256; never in git).
+# Pull requests and dispatches stay WAD-free, unless a dispatch sets
+# `shareware`.
 
 on:
   push:
@@ -18,6 +23,7 @@ on:
     paths:
       - '.github/workflows/release-arch.yml'
       - 'packaging/arch/**'
+      - 'packaging/shareware/**'
   workflow_dispatch:
     inputs:
       tag:
@@ -28,6 +34,13 @@ on:
         description: 'Package version when no tag is given (default: 0.0.0+git.<short sha>)'
         required: false
         default: ''
+      shareware:
+        description: >-
+          Bundle the shareware DOOM1.WAD, as a tag does (the artifact
+          then holds it)
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -93,16 +106,33 @@ jobs:
           echo "source=$source" >> "$GITHUB_OUTPUT"
           echo "Version: $version, source $source ($(git rev-parse "$source^{commit}")), packaging $(git rev-parse HEAD)"
 
+      # A tag's package ships the shareware DOOM1.WAD; everything else
+      # stays WAD-free unless a dispatch asks for it. The WAD is
+      # downloaded outside the checkout and must match its SHA-256.
+      - name: Shareware DOOM1.WAD
+        id: wad
+        if: (github.event_name == 'push' && github.ref_type == 'tag') || inputs.shareware
+        env:
+          DOOM1_WAD_URL: ${{ vars.DOOM1_WAD_URL }}
+        run: |
+          [ -n "$DOOM1_WAD_URL" ] || unset DOOM1_WAD_URL
+          wad=/tmp/doom1-wad/DOOM1.WAD
+          packaging/shareware/fetch-doom1-wad.sh "$wad"
+          chmod -R a+rX /tmp/doom1-wad
+          echo "path=$wad" >> "$GITHUB_OUTPUT"
+
       # makepkg refuses to run as root.
       - name: Build
         env:
           VERSION: ${{ steps.version.outputs.version }}
           SOURCE: ${{ steps.version.outputs.source }}
+          DOOM1_WAD: ${{ steps.wad.outputs.path }}
         run: |
           useradd -m builder
           chown -R builder: "$GITHUB_WORKSPACE"
           su builder -c "git config --global --add safe.directory '$GITHUB_WORKSPACE' &&
-                         packaging/arch/make-package.sh '$VERSION' dist '$SOURCE'"
+                         DOOM1_WAD='$DOOM1_WAD' packaging/arch/make-package.sh '$VERSION' dist '$SOURCE'"
+          [ -z "$DOOM1_WAD" ] || packaging/shareware/check-wad-in-package.sh dist/*.pkg.tar.zst
 
       # The dispatch-with-a-tag path, for a tag made before
       # packaging/arch/ existed: the package must build from that tag's
@@ -134,6 +164,8 @@ jobs:
       # Install, run without an IWAD, and remove, on a clean Arch. The
       # runner has no GPU or display, so the game is played on real
       # hardware.
+      # A shareware package's DOOM1.WAD is set aside for the no-IWAD
+      # run, then must be the IWAD picked when there is no other.
       - name: Install, run, remove
         run: |
           pacman -U --noconfirm dist/*.pkg.tar.zst
@@ -144,6 +176,8 @@ jobs:
           test -f /usr/share/licenses/raylibdoom/LICENSE.TXT
           ldd /usr/bin/raylibdoom
           ! ldd /usr/bin/raylibdoom | grep -q 'not found'
+          bundled=/usr/share/raylibdoom/doom1.wad
+          [ ! -e $bundled ] || mv $bundled $bundled.aside
           empty=$(mktemp -d)
           status=0
           (cd "$empty" && HOME=$empty DOOMWADDIR=$empty raylibdoom) \
@@ -152,9 +186,16 @@ jobs:
           [ "$status" -ne 0 ]
           grep -q "No IWAD found" "$empty/out.txt"
           grep -q "/usr/share/games/doom" "$empty/out.txt"
+          if [ -e $bundled.aside ]; then
+            mv $bundled.aside $bundled
+            (cd "$empty" && HOME=$empty raylibdoom -nosound 2>&1 || true) |
+              tee "$empty/out2.txt" | grep '^ adding'
+            [ "$(sed -n 's/^ adding //p' "$empty/out2.txt" | head -1)" = $bundled ]
+          fi
           pacman -R --noconfirm raylibdoom
           test ! -e /usr/bin/raylibdoom
           test ! -e /usr/share/applications/raylibdoom.desktop
+          test ! -e /usr/share/raylibdoom
 
       - uses: actions/upload-artifact@v4
         with:
@@ -187,6 +228,13 @@ jobs:
         with:
           name: raylibdoom-${{ needs.package.outputs.version }}-arch-x86_64
           path: dist
+
+      - name: Check
+        working-directory: dist
+        run: |
+          sudo apt-get install -y --no-install-recommends libarchive-tools > /dev/null
+          sha256sum -c ./*.sha256
+          sh ../packaging/shareware/check-wad-in-package.sh ./*.pkg.tar.zst
 
       - name: Upload to the draft release
         env:

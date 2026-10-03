@@ -4,6 +4,11 @@ name: release-windows
 # draft GitHub Release for the tag. workflow_dispatch, and pull
 # requests that change the packaging, build it and keep it as an
 # Actions artifact only.
+#
+# A tag's zip ships the shareware DOOM1.WAD next to the exe (downloaded
+# at build time and checked by its SHA-256; never in git). Pull
+# requests and dispatches stay WAD-free, unless a dispatch sets
+# `shareware`.
 
 on:
   push:
@@ -12,6 +17,7 @@ on:
     paths:
       - '.github/workflows/release-windows.yml'
       - 'packaging/windows/**'
+      - 'packaging/shareware/**'
       - 'linuxdoom-1.10/i_win32.*'
   workflow_dispatch:
     inputs:
@@ -19,6 +25,13 @@ on:
         description: 'Package version (default: 0.0.0+git.<short sha>)'
         required: false
         default: ''
+      shareware:
+        description: >-
+          Bundle the shareware DOOM1.WAD, as a tag does (the artifact
+          then holds it)
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -41,7 +54,7 @@ jobs:
           msystem: MINGW64
           update: true
           install: >-
-            git zip
+            git zip unzip
             mingw-w64-x86_64-gcc
             mingw-w64-x86_64-cmake
             mingw-w64-x86_64-ninja
@@ -73,16 +86,34 @@ jobs:
       - name: Build
         run: cmake --build build
 
+      # A tag's packages ship the shareware DOOM1.WAD; everything else
+      # stays WAD-free unless a dispatch asks for it. The WAD is
+      # downloaded outside the checkout and must match its SHA-256.
+      - name: Shareware DOOM1.WAD
+        id: wad
+        if: (github.event_name == 'push' && github.ref_type == 'tag') || inputs.shareware
+        env:
+          DOOM1_WAD_URL: ${{ vars.DOOM1_WAD_URL }}
+        run: |
+          [ -n "$DOOM1_WAD_URL" ] || unset DOOM1_WAD_URL
+          wad=$(cygpath -u "$RUNNER_TEMP")/DOOM1.WAD
+          packaging/shareware/fetch-doom1-wad.sh "$wad"
+          echo "path=$wad" >> "$GITHUB_OUTPUT"
+
       - name: Package
+        env:
+          DOOM1_WAD: ${{ steps.wad.outputs.path }}
         run: |
           gcc --version | head -1
           packaging/windows/make-package.sh "${{ steps.version.outputs.version }}" build dist
           objdump -p build/raylibdoom.exe | grep -E 'DLL Name|Subsystem'
+          [ -z "$DOOM1_WAD" ] || packaging/shareware/check-wad-in-package.sh dist/*.zip
 
-      # Unzip the package in an empty folder and run it with no IWAD:
-      # it must start without any MinGW DLL, look for the IWAD next to
-      # itself, and exit with an error. The runner has no GPU, so the
-      # game is not played here; that is tested on real hardware.
+      # Unzip the package in an empty folder and run it with no IWAD
+      # (a shareware zip's DOOM1.WAD is removed first): it must start
+      # without any MinGW DLL, look for the IWAD next to itself, and
+      # exit with an error. The runner has no GPU, so the game is not
+      # played here; that is tested on real hardware.
       - name: Smoke test
         shell: pwsh
         run: |
@@ -90,6 +121,12 @@ jobs:
           $dir = Join-Path $env:RUNNER_TEMP smoke
           Expand-Archive $zip -DestinationPath $dir
           $exe = Get-ChildItem $dir -Recurse -Filter raylibdoom.exe
+          $wad = Join-Path $exe.DirectoryName DOOM1.WAD
+          if (Test-Path $wad) {
+            $sum = (Get-FileHash $wad -Algorithm SHA256).Hash.ToLower()
+            if ($sum -ne '1d7d43be501e67d927e415e0b8f3e29c3bf33075e859721816f652a526cac771') { throw "DOOM1.WAD: $sum" }
+            Remove-Item $wad
+          }
           Push-Location $env:RUNNER_TEMP
           $out = & $exe.FullName -nosound 2>&1 | Out-String
           $code = $LASTEXITCODE
@@ -130,6 +167,12 @@ jobs:
         with:
           name: raylibdoom-${{ needs.package.outputs.version }}-windows-x64
           path: dist
+
+      - name: Check
+        working-directory: dist
+        run: |
+          sha256sum -c ./*.sha256
+          sh ../packaging/shareware/check-wad-in-package.sh ./*.zip
 
       # Uploads only to a draft (the oldest, if the OS jobs raced to
       # create two) and fails, changing nothing, if the tag's release

@@ -8,6 +8,11 @@
 # BUILD_DIR is the CMake build directory: the executable is taken from
 # there, and the raylib and GLFW licenses from the raylib source
 # FetchContent put in it.
+#
+# When DOOM1_WAD names the shareware DOOM1.WAD (checked by
+# packaging/shareware/fetch-doom1-wad.sh), the zip ships it, unmodified,
+# next to raylibdoom.exe, with DOOM1-NOTICE.txt. Without it there is
+# no game data.
 
 set -eu
 
@@ -73,6 +78,14 @@ crlf "$raylib/LICENSE" "$tree/raylib-LICENSE.txt"
 crlf "$raylib/src/external/glfw/LICENSE.md" "$tree/glfw-LICENSE.md"
 crlf "$here/mingw-w64-runtime-LICENSE.txt" "$tree/mingw-w64-runtime-LICENSE.txt"
 crlf "$here/gcc-RUNTIME-EXCEPTION.txt" "$tree/gcc-RUNTIME-EXCEPTION.txt"
+if [ -n "${DOOM1_WAD:-}" ]; then
+    "$top/packaging/shareware/fetch-doom1-wad.sh" "$tree/DOOM1.WAD"
+    crlf "$top/packaging/shareware/DOOM1-NOTICE.txt" "$tree/DOOM1-NOTICE.txt"
+    sed -i 's/No game data (IWAD) is included; see README\.txt\./The shareware DOOM1.WAD is included, unmodified; see DOOM1-NOTICE.txt./' \
+        "$tree/THIRD-PARTY-NOTICES.txt"
+    grep -q "DOOM1.WAD is included" "$tree/THIRD-PARTY-NOTICES.txt" ||
+        { echo "could not update THIRD-PARTY-NOTICES.txt" >&2; exit 1; }
+fi
 
 find "$tree" -exec touch -d "@$SOURCE_DATE_EPOCH" {} +
 

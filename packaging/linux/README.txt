@@ -7,7 +7,12 @@ https://github.com/raydelto/raylib_DOOM
 Game data
 ---------
 
-No game data is included. DOOM needs an IWAD, which is one of:
+Release packages include the free shareware DOOM1.WAD (episode 1,
+unmodified; see DOOM1-NOTICE.txt), so the game runs right after
+installing. It is used only when no other IWAD is found: any IWAD of
+your own, in the places below, wins over it. Packages built from the
+source without it include no game data. DOOM needs an IWAD, which is
+one of:
 
   doom1.wad      the shareware episode, free to share
   doom.wad       registered DOOM, doomu.wad for The Ultimate DOOM
@@ -24,6 +29,9 @@ upper- or mixed-case names such as DOOM1.WAD are found too:
   3. an IWAD named with -file (raylibdoom -file DOOM1.WAD)
   4. /usr/local/share/games/doom
   5. /usr/share/games/doom
+  6. the shareware DOOM1.WAD the release packages ship with: next to
+     raylibdoom in the .tar.gz, /usr/share/raylibdoom with the .deb
+     and the Arch package
 
 On Debian and Ubuntu, "sudo apt install freedoom" installs Freedoom into
 /usr/share/games/doom, where the game finds it. To use an IWAD under any
@@ -31,7 +39,9 @@ other name or path, name it on the command line:
 
   raylibdoom -iwad ~/wads/freedoom2.wad
 
-If no IWAD is found the game prints where it looked and exits.
+-iwad always wins, so it also picks another IWAD over a shareware one
+found earlier. If no IWAD is found the game prints where it looked and
+exits.
 
 Running
 -------

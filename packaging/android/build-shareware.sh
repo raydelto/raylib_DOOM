@@ -6,8 +6,9 @@
 #   packaging/android/build-shareware.sh VERSION /path/to/DOOM1.WAD KEYSTORE OUTDIR
 #
 # The WAD must be outside the checkout and is checked by its SHA-256
-# (android/app/build.gradle, -PbundleWad); it never goes into git or
-# CI. The default build, and release-android.yml, stay WAD-free. The
+# (android/app/build.gradle, -PbundleWad); it never goes into
+# git. The default build, CI and pull requests stay WAD-free; a tag's
+# release-android.yml run builds this same APK. The
 # About screen links to the source at the commit built.
 
 set -eu

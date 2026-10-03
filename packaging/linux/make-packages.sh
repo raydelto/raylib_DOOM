@@ -10,6 +10,12 @@
 # BUILD_DIR is the CMake build directory: the binary is taken from
 # there, and the raylib and GLFW licenses from the raylib source
 # FetchContent put in it.
+#
+# When DOOM1_WAD names the shareware DOOM1.WAD (checked by
+# packaging/shareware/fetch-doom1-wad.sh), both packages ship it,
+# unmodified, with DOOM1-NOTICE.txt: the .deb in /usr/share/raylibdoom,
+# the .tar.gz next to the binary. The game looks there last, after
+# every other IWAD. Without DOOM1_WAD there is no game data.
 
 set -eu
 
@@ -52,6 +58,13 @@ stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT
 umask 022
 
+wad=
+if [ -n "${DOOM1_WAD:-}" ]; then
+    wad=$stage/doom1.wad
+    "$top/packaging/shareware/fetch-doom1-wad.sh" "$wad"
+fi
+notice=$top/packaging/shareware/DOOM1-NOTICE.txt
+
 # Everything in the packages has a fixed timestamp, so the same
 # commit gives the same archives.
 : "${SOURCE_DATE_EPOCH:=$(git -C "$top" log -1 --format=%ct 2>/dev/null || date +%s)}"
@@ -87,6 +100,26 @@ install -m 0644 "$here/raylibdoom.svg" \
 gzip -9n < "$here/raylibdoom.6" > "$deb/usr/share/man/man6/raylibdoom.6.gz"
 install -m 0644 "$here/copyright" "$doc/copyright"
 gzip -9n < "$here/README.txt" > "$doc/README.gz"
+if [ -n "$wad" ]; then
+    install -d "$deb/usr/share/raylibdoom"
+    install -m 0644 "$wad" "$deb/usr/share/raylibdoom/doom1.wad"
+    install -m 0644 "$notice" "$doc/DOOM1-NOTICE.txt"
+    sed -i 's/^ No game data (IWAD) is included; see README\.$/ The shareware DOOM1.WAD is included, unmodified; see its stanza./' \
+        "$doc/copyright"
+    grep -q "DOOM1.WAD is included" "$doc/copyright" ||
+        { echo "could not update copyright" >&2; exit 1; }
+    cat >> "$doc/copyright" <<EOF
+
+Files: usr/share/raylibdoom/doom1.wad
+Copyright: 1993 id Software, Inc.
+License: DOOM-shareware
+ DOOM shareware (c) id Software. Not affiliated with id Software /
+ ZeniMax / Microsoft. The shareware DOOM1.WAD (DOOM 1.9, episode 1) is
+ shipped unmodified, and may be shared freely only as that unmodified
+ file. It is game data, not covered by the GPL or by the other
+ licenses here. See /usr/share/doc/raylibdoom/DOOM1-NOTICE.txt.
+EOF
+fi
 
 date=$(date -u -R -d "@$SOURCE_DATE_EPOCH")
 maintainer="Raydelto Hernandez <raydelto@gmail.com>"
@@ -121,9 +154,19 @@ Description: DOOM (1997 Linux source release) running on raylib
  raylib opens the window, scales the 320x200 picture, reads the keyboard
  and mouse, and plays the sound effects and OPL music.
  .
+$(if [ -n "$wad" ]; then cat <<WAD
+ This package includes the shareware DOOM1.WAD (episode 1, unmodified;
+ DOOM shareware (c) id Software, not affiliated with id Software /
+ ZeniMax / Microsoft), so it plays right after installing. Any other
+ IWAD in \$DOOMWADDIR, the current directory or /usr/share/games/doom,
+ where the freedoom package installs Freedoom, is used instead.
+WAD
+else cat <<NOWAD
  No game data is included. The game looks for an IWAD in \$DOOMWADDIR,
  the current directory and /usr/share/games/doom, where the freedoom
  package installs Freedoom. The shareware doom1.wad works too.
+NOWAD
+fi)
 EOF
 (cd "$deb" && find usr -type f | LC_ALL=C sort | xargs md5sum) \
     > "$deb/DEBIAN/md5sums"
@@ -150,6 +193,10 @@ install -m 0644 "$here/copyright" "$tree/THIRD-PARTY-NOTICES.txt"
 install -m 0644 "$here/raylibdoom.desktop" "$tree/raylibdoom.desktop"
 install -m 0644 "$here/raylibdoom.svg" "$tree/raylibdoom.svg"
 install -m 0644 "$here/raylibdoom.6" "$tree/raylibdoom.6"
+if [ -n "$wad" ]; then
+    install -m 0644 "$wad" "$tree/doom1.wad"
+    install -m 0644 "$notice" "$tree/DOOM1-NOTICE.txt"
+fi
 
 tarfile=$name.tar.gz
 tar -C "$stage" --sort=name --owner=0 --group=0 --numeric-owner \

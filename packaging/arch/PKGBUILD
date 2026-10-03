@@ -6,7 +6,7 @@
 # checked-out commit with it instead.
 
 pkgname=raylibdoom
-pkgver=0.1.1
+pkgver=0.1.3
 pkgrel=1
 _raylibver=5.5
 pkgdesc='DOOM (1997 Linux source release) running on raylib'
@@ -66,4 +66,12 @@ package() {
   install -Dm644 "$raylib/LICENSE" "$lic/raylib-LICENSE.txt"
   install -Dm644 "$raylib/src/external/glfw/LICENSE.md" "$lic/glfw-LICENSE.md"
   install -Dm644 "$linux/copyright" "$lic/THIRD-PARTY-NOTICES.txt"
+
+  # The release package only (make-package.sh with DOOM1_WAD set): the
+  # shareware DOOM1.WAD, unmodified, where the game looks last.
+  if [ -n "${DOOM1_WAD:-}" ]; then
+    install -Dm644 "$DOOM1_WAD" "$pkgdir/usr/share/raylibdoom/doom1.wad"
+    install -Dm644 "$src/packaging/shareware/DOOM1-NOTICE.txt" \
+      "$lic/DOOM1-NOTICE.txt"
+  fi
 }

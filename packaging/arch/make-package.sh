@@ -14,6 +14,11 @@
 # it gets pkgver=VERSION and the checksum of a git archive of REVISION,
 # which is put where makepkg looks before downloading. raylib is still
 # downloaded and checked against the PKGBUILD's checksum.
+#
+# When DOOM1_WAD names the shareware DOOM1.WAD (checked by
+# packaging/shareware/fetch-doom1-wad.sh), the package ships it in
+# /usr/share/raylibdoom, with DOOM1-NOTICE.txt. REVISION must then
+# have packaging/shareware/.
 
 set -eu
 
@@ -54,6 +59,12 @@ sed -e "s/^pkgver=.*/pkgver=$version/" \
     "$here/PKGBUILD" > "$work/PKGBUILD"
 grep -q "^sha256sums=('$sum'" "$work/PKGBUILD" ||
     { echo "could not set the source checksum" >&2; exit 1; }
+
+if [ -n "${DOOM1_WAD:-}" ]; then
+    "$top/packaging/shareware/fetch-doom1-wad.sh" "$work/doom1.wad"
+    DOOM1_WAD=$work/doom1.wad
+    export DOOM1_WAD
+fi
 
 (cd "$work" && PKGDEST="$out" SRCDEST="$work" makepkg --noconfirm --cleanbuild ${MAKEPKG_FLAGS:-})
 

@@ -7,7 +7,10 @@ raylibdoom \- the 1997 Linux DOOM source release, running on raylib
 .SH DESCRIPTION
 .B raylibdoom
 is id Software's 1997 Linux DOOM source release, ported from X11 and
-OSS to raylib. It needs an IWAD (game data file), which is not included.
+OSS to raylib. It needs an IWAD (game data file); the release packages
+include the shareware
+.IR doom1.wad ,
+and any other IWAD found is used instead.
 Use
 .I doom1.wad
 from the shareware episode, your own
@@ -21,7 +24,11 @@ The IWAD is looked for, in this order, in
 and the current directory, then as an IWAD given with
 .BR \-file ,
 then in
-.IR /usr/local/share/games/doom " and " /usr/share/games/doom .
+.IR /usr/local/share/games/doom " and " /usr/share/games/doom ,
+and last next to the executable and in
+.IR /usr/share/raylibdoom ,
+where the release packages put the shareware
+.IR doom1.wad .
 Upper- or mixed-case file names are found too.
 .SH OPTIONS
 .TP

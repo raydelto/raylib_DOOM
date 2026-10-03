@@ -34,6 +34,19 @@ if ldd /usr/games/raylibdoom | grep -q "not found"; then
     exit 1
 fi
 
+# A release .deb ships the shareware DOOM1.WAD, unmodified. It is set
+# aside for the no-IWAD run and the search order below, which it would
+# otherwise end, and checked to come last afterwards.
+bundled=/usr/share/raylibdoom/doom1.wad
+if [ -e "$bundled" ]; then
+    echo "== bundled shareware DOOM1.WAD"
+    echo "1d7d43be501e67d927e415e0b8f3e29c3bf33075e859721816f652a526cac771  $bundled" |
+        sha256sum -c
+    test -f /usr/share/doc/raylibdoom/DOOM1-NOTICE.txt
+    grep -q "Not affiliated with id Software" /usr/share/doc/raylibdoom/DOOM1-NOTICE.txt
+    mv "$bundled" "$bundled.aside"
+fi
+
 # Without an IWAD the game must stop before opening a window, with a
 # message that says what to do.
 echo "== run without an IWAD"
@@ -89,6 +102,19 @@ loads "mine/my.wad" \
     env DOOMWADDIR="$empty/nowads" /usr/games/raylibdoom -file mine/my.wad
 rm -rf /usr/share/games/doom
 
+# The shipped DOOM1.WAD only when there is no other IWAD; -iwad and
+# $DOOMWADDIR still win over it.
+if [ -e "$bundled.aside" ]; then
+    echo "== bundled IWAD comes last"
+    mv "$bundled.aside" "$bundled"
+    picks "$bundled" env -u DOOMWADDIR /usr/games/raylibdoom
+    picks "$empty/waddir/DOOM1.WAD" env DOOMWADDIR="$empty/waddir" /usr/games/raylibdoom
+    picks mine/my.wad env -u DOOMWADDIR /usr/games/raylibdoom -iwad mine/my.wad
+    fakewad /usr/share/games/doom/freedoom1.wad
+    picks /usr/share/games/doom/freedoom1.wad env -u DOOMWADDIR /usr/games/raylibdoom
+    rm -rf /usr/share/games/doom
+fi
+
 echo "== remove"
 apt-get purge -y raylibdoom
 if dpkg -s raylibdoom > /dev/null 2>&1; then
@@ -97,7 +123,7 @@ if dpkg -s raylibdoom > /dev/null 2>&1; then
 fi
 for f in /usr/games/raylibdoom /usr/share/applications/raylibdoom.desktop \
          /usr/share/icons/hicolor/scalable/apps/raylibdoom.svg \
-         /usr/share/doc/raylibdoom; do
+         /usr/share/doc/raylibdoom /usr/share/raylibdoom; do
     [ ! -e "$f" ] || { echo "left behind: $f" >&2; exit 1; }
 done
 echo "== PASS on $PRETTY_NAME"

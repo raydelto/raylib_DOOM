@@ -19,7 +19,8 @@
 // checked by its SHA-256) into the APK as assets/doom1.wad, unmodified;
 // the launcher then plays it when no other IWAD is chosen. The file
 // must be outside the checkout: no WAD goes into git, and builds
-// without the property (CI, release-android.yml) stay WAD-free.
+// without the property (CI, pull requests) stay WAD-free; a tag's
+// release-android.yml run passes it.
 // packaging/android/build-shareware.sh makes that APK.
 
 plugins {

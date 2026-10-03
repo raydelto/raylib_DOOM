@@ -5,6 +5,11 @@ name: release-macos
 # that change the macOS packaging, build it and keep it as an Actions
 # artifact only.
 #
+# A tag's app ships the shareware DOOM1.WAD in Contents/Resources
+# (downloaded at build time and checked by its SHA-256; never in git).
+# Pull requests and dispatches stay WAD-free, unless a dispatch sets
+# `shareware`.
+#
 # Signing is ad-hoc until these repository secrets are added; then the
 # app and dmg are signed with the Developer ID and the dmg notarized:
 #   MACOS_CERT_P12        base64 of the Developer ID Application .p12
@@ -20,6 +25,7 @@ on:
     paths:
       - '.github/workflows/release-macos.yml'
       - 'packaging/macos/**'
+      - 'packaging/shareware/**'
       # The app's startup and linking.
       - 'CMakeLists.txt'
       - 'linuxdoom-1.10/i_main.c'
@@ -31,6 +37,13 @@ on:
         description: 'Package version (default: 0.0.0+git.<short sha>)'
         required: false
         default: ''
+      shareware:
+        description: >-
+          Bundle the shareware DOOM1.WAD, as a tag does (the artifact
+          then holds it)
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -89,8 +102,23 @@ jobs:
             $(security list-keychains -d user | tr -d '"')
           rm "$RUNNER_TEMP/cert.p12"
 
+      # A tag's packages ship the shareware DOOM1.WAD; everything else
+      # stays WAD-free unless a dispatch asks for it. The WAD is
+      # downloaded outside the checkout and must match its SHA-256.
+      - name: Shareware DOOM1.WAD
+        id: wad
+        if: (github.event_name == 'push' && github.ref_type == 'tag') || inputs.shareware
+        env:
+          DOOM1_WAD_URL: ${{ vars.DOOM1_WAD_URL }}
+        run: |
+          [ -n "$DOOM1_WAD_URL" ] || unset DOOM1_WAD_URL
+          wad=$RUNNER_TEMP/DOOM1.WAD
+          packaging/shareware/fetch-doom1-wad.sh "$wad"
+          echo "path=$wad" >> "$GITHUB_OUTPUT"
+
       - name: Package
         env:
+          DOOM1_WAD: ${{ steps.wad.outputs.path }}
           MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
           MACOS_NOTARY_APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
           MACOS_NOTARY_TEAM_ID: ${{ secrets.MACOS_NOTARY_TEAM_ID }}
@@ -98,6 +126,8 @@ jobs:
         run: packaging/macos/make-dmg.sh "${{ steps.version.outputs.version }}" build dist
 
       - name: Check
+        env:
+          DOOM1_WAD: ${{ steps.wad.outputs.path }}
         run: |
           dmg=$(ls dist/*.dmg)
           mnt=$(mktemp -d)
@@ -115,7 +145,17 @@ jobs:
           test -L "$mnt/Applications"
           test -f "$mnt/README.txt"
           # With no IWAD anywhere, the app logs that (and shows a
-          # dialog, which nobody closes here).
+          # dialog, which nobody closes here). With the shareware
+          # DOOM1.WAD inside, it plays that one.
+          if [ -n "$DOOM1_WAD" ]; then
+            wad=$app/Contents/Resources/DOOM1.WAD
+            test "$(shasum -a 256 "$wad" | cut -d' ' -f1)" = \
+              1d7d43be501e67d927e415e0b8f3e29c3bf33075e859721816f652a526cac771
+            test -f "$app/Contents/Resources/licenses/DOOM1-NOTICE.txt"
+            test -f "$mnt/DOOM1-NOTICE.txt"
+          else
+            if ls "$app/Contents/Resources" | grep -qi '\.wad$'; then exit 1; fi
+          fi
           home=$(mktemp -d)
           HOME=$home DOOMWADDIR= "$app/Contents/MacOS/raylibdoom" -nosound \
             > /dev/null 2>&1 < /dev/null &
@@ -123,7 +163,11 @@ jobs:
           sleep 10
           kill $pid 2>/dev/null || true
           cat "$home/Library/Logs/raylibDOOM.log"
-          grep -q 'No IWAD found' "$home/Library/Logs/raylibDOOM.log"
+          if [ -n "$DOOM1_WAD" ]; then
+            grep -q 'Contents/Resources/DOOM1.WAD' "$home/Library/Logs/raylibDOOM.log"
+          else
+            grep -q 'No IWAD found' "$home/Library/Logs/raylibDOOM.log"
+          fi
           hdiutil detach "$mnt"
 
       - uses: actions/upload-artifact@v4

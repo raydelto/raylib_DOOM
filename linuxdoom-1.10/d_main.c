@@ -773,13 +773,22 @@ static boolean UseIWAD (char* path)
 // The IWADs looked for, best first, and the directories looked in:
 // $DOOMWADDIR and the current directory, then, on Linux and only
 // after an IWAD given with -file, the system-wide directories where
-// distribution packages (freedoom, game-data-packager) install IWADs.
+// distribution packages (freedoom, game-data-packager) install IWADs,
+// and last the directories where the release packages put the
+// shareware DOOM1.WAD they ship with, so any other IWAD wins over it.
 typedef struct
 {
     char*	name;
     GameMode_t	mode;
     Language_t	language;
 } iwadname_t;
+
+// Linux desktop builds also look next to the executable and in
+// ../share/raylibdoom, where the release packages put DOOM1.WAD.
+#if defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
+#define BUNDLEDIRS
+#include <limits.h>
+#endif
 
 static iwadname_t iwadnames[] =
 {
@@ -803,11 +812,52 @@ static char* iwaddirs[] =
     "/usr/local/share/games/doom",
     "/usr/share/games/doom",
 #endif
+#ifdef BUNDLEDIRS
+    NULL,	// the executable's directory (the .tar.gz)
+    NULL,	// its ../share/raylibdoom (the .deb and Arch packages)
+#endif
 };
 
 #define NUMIWADNAMES	(sizeof(iwadnames)/sizeof(iwadnames[0]))
 #define NUMIWADDIRS	(sizeof(iwaddirs)/sizeof(iwaddirs[0]))
 #define NUMUSERDIRS	2	// $DOOMWADDIR and "."
+
+
+#ifdef BUNDLEDIRS
+//
+// BundledDirs
+// Fills in the last two iwaddirs from where the executable is:
+// /usr/games/raylibdoom gives /usr/games and /usr/share/raylibdoom.
+//
+static void BundledDirs (void)
+{
+    static boolean	done;
+    static char		exedir[PATH_MAX];
+    static char		sharedir[PATH_MAX + 32];
+    char*		slash;
+
+    if (done)
+	return;
+    done = true;
+
+    if (!realpath ("/proc/self/exe", exedir))
+	return;
+    slash = strrchr (exedir, '/');
+    if (!slash)
+	return;
+    *slash = '\0';
+    if (!exedir[0])
+	strcpy (exedir, "/");
+    iwaddirs[NUMIWADDIRS-2] = exedir;
+
+    strcpy (sharedir, exedir);
+    slash = strrchr (sharedir, '/');
+    if (slash)
+	*slash = '\0';
+    strcat (sharedir, "/share/raylibdoom");
+    iwaddirs[NUMIWADDIRS-1] = sharedir;
+}
+#endif
 
 
 //
@@ -822,6 +872,9 @@ static boolean FindIWAD (int first, int last)
     char*	path;
 
     iwaddirs[0] = getenv ("DOOMWADDIR");
+#ifdef BUNDLEDIRS
+    BundledDirs ();
+#endif
 
     for (d = first; d < last; d++)
     {
@@ -945,7 +998,7 @@ void IdentifyVersion (void)
 	if (d == 0)
 	    fprintf (stderr, "  $DOOMWADDIR (%s)\n",
 		     iwaddirs[0] ? iwaddirs[0] : "not set");
-	else
+	else if (iwaddirs[d])
 	    fprintf (stderr, "  %s\n", iwaddirs[d]);
     }
     I_Error ("No IWAD found. Put one in one of the directories above,\n"
