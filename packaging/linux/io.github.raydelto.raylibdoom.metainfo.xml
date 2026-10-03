@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.raydelto.raylibdoom</id>
+  <metadata_license>FSFAP</metadata_license>
+  <project_license>GPL-2.0-only AND LGPL-2.1-or-later</project_license>
+  <name>raylib DOOM</name>
+  <summary>The 1997 Linux DOOM source release, running on raylib</summary>
+  <developer id="io.github.raydelto">
+    <name>Raydelto Hernandez</name>
+  </developer>
+  <description>
+    <p>
+      DOOM, from the source id Software released for Linux in 1997
+      (linuxdoom-1.10), ported from X11 and OSS to raylib and made to
+      run on 64-bit systems. The original software renderer is kept:
+      it draws the 320x200 paletted picture, which raylib shows scaled
+      to 4:3, with sound effects and OPL3-emulated music.
+    </p>
+    <p>
+      It needs game data (an IWAD): the free Freedoom, the shareware
+      DOOM episode, or your own DOOM, Ultimate DOOM or DOOM II.
+    </p>
+  </description>
+  <launchable type="desktop-id">raylibdoom.desktop</launchable>
+  <icon type="stock">raylibdoom</icon>
+  <url type="homepage">https://github.com/raydelto/raylib_DOOM</url>
+  <url type="bugtracker">https://github.com/raydelto/raylib_DOOM/issues</url>
+  <url type="vcs-browser">https://github.com/raydelto/raylib_DOOM</url>
+  <categories>
+    <category>Game</category>
+    <category>ActionGame</category>
+  </categories>
+  <keywords>
+    <keyword>doom</keyword>
+    <keyword>fps</keyword>
+    <keyword>shooter</keyword>
+    <keyword>freedoom</keyword>
+  </keywords>
+  <provides>
+    <binary>raylibdoom</binary>
+  </provides>
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </supports>
+  <content_rating type="oars-1.1">
+    <content_attribute id="violence-cartoon">none</content_attribute>
+    <content_attribute id="violence-fantasy">intense</content_attribute>
+    <content_attribute id="violence-realistic">moderate</content_attribute>
+    <content_attribute id="violence-bloodshed">intense</content_attribute>
+    <content_attribute id="violence-sexual">none</content_attribute>
+    <content_attribute id="drugs-alcohol">none</content_attribute>
+    <content_attribute id="drugs-narcotics">none</content_attribute>
+    <content_attribute id="drugs-tobacco">none</content_attribute>
+    <content_attribute id="sex-nudity">none</content_attribute>
+    <content_attribute id="sex-themes">none</content_attribute>
+    <content_attribute id="language-profanity">none</content_attribute>
+    <content_attribute id="language-humor">none</content_attribute>
+    <content_attribute id="language-discrimination">none</content_attribute>
+    <content_attribute id="social-chat">none</content_attribute>
+    <content_attribute id="social-info">none</content_attribute>
+    <content_attribute id="social-audio">none</content_attribute>
+    <content_attribute id="social-location">none</content_attribute>
+    <content_attribute id="social-contacts">none</content_attribute>
+    <content_attribute id="money-purchasing">none</content_attribute>
+    <content_attribute id="money-gambling">none</content_attribute>
+  </content_rating>
+  <releases>
+    <release version="0.2.0" date="2026-10-03"/>
+  </releases>
+</component>
