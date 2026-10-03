@@ -73,5 +73,8 @@ package() {
     install -Dm644 "$DOOM1_WAD" "$pkgdir/usr/share/raylibdoom/doom1.wad"
     install -Dm644 "$src/packaging/shareware/DOOM1-NOTICE.txt" \
       "$lic/DOOM1-NOTICE.txt"
+    sed -i 's/^ No game data (IWAD) is included; see README\.$/ The shareware DOOM1.WAD is included, unmodified; see DOOM1-NOTICE.txt./' \
+      "$lic/THIRD-PARTY-NOTICES.txt"
+    grep -q "DOOM1.WAD is included" "$lic/THIRD-PARTY-NOTICES.txt"
   fi
 }

@@ -11,10 +11,11 @@ name: release-arch
 # package to that draft. Published releases are never changed, and no
 # tag is ever created.
 #
-# A tag's package ships the shareware DOOM1.WAD in /usr/share/raylibdoom
+# Every package that goes to a release (a tag push, or a dispatch given
+# a draft's tag) ships the shareware DOOM1.WAD in /usr/share/raylibdoom
 # (downloaded at build time and checked by its SHA-256; never in git).
-# Pull requests and dispatches stay WAD-free, unless a dispatch sets
-# `shareware`.
+# Pull requests and dispatches without a tag stay WAD-free, unless a
+# dispatch sets `shareware`.
 
 on:
   push:
@@ -37,7 +38,7 @@ on:
       shareware:
         description: >-
           Bundle the shareware DOOM1.WAD, as a tag does (the artifact
-          then holds it)
+          then holds it; always on when a tag is given)
         type: boolean
         required: false
         default: false
@@ -106,12 +107,14 @@ jobs:
           echo "source=$source" >> "$GITHUB_OUTPUT"
           echo "Version: $version, source $source ($(git rev-parse "$source^{commit}")), packaging $(git rev-parse HEAD)"
 
-      # A tag's package ships the shareware DOOM1.WAD; everything else
-      # stays WAD-free unless a dispatch asks for it. The WAD is
-      # downloaded outside the checkout and must match its SHA-256.
+      # A package for a release (a tag push, or a dispatch given a tag,
+      # whatever `shareware` says) ships the shareware DOOM1.WAD, which
+      # the release job checks for; everything else stays WAD-free
+      # unless a dispatch asks for it. The WAD is downloaded outside the
+      # checkout and must match its SHA-256.
       - name: Shareware DOOM1.WAD
         id: wad
-        if: (github.event_name == 'push' && github.ref_type == 'tag') || inputs.shareware
+        if: (github.event_name == 'push' && github.ref_type == 'tag') || (github.event_name == 'workflow_dispatch' && inputs.tag != '') || inputs.shareware
         env:
           DOOM1_WAD_URL: ${{ vars.DOOM1_WAD_URL }}
         run: |
@@ -213,7 +216,8 @@ jobs:
       - name: Test upload-release.sh
         run: sh packaging/arch/test-upload-release.sh
 
-  # A tag push, or a workflow_dispatch given a tag, uploads.
+  # A tag push, or a workflow_dispatch given a tag, uploads; both built
+  # the package with the WAD, which is checked again here.
   # upload-release.sh checks the event again and only adds to a draft.
   release:
     if: (github.event_name == 'push' && github.ref_type == 'tag') || (github.event_name == 'workflow_dispatch' && inputs.tag != '')

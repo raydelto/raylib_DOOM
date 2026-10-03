@@ -139,28 +139,37 @@ draft='[{"id":9,"tag_name":"v1.2.3","draft":true,"html_url":"https://x/u9",
 pub='[{"id":7,"tag_name":"v1.2.3","draft":false,"html_url":"https://x/v1.2.3",
        "assets":[{"id":70,"name":"raylibdoom-windows.zip"}]}]'
 
-# The release job's condition, evaluated for each trigger. Only a tag
-# push and a workflow_dispatch given a tag reach the upload step.
+# The release job's and the WAD step's conditions, evaluated for each
+# trigger. Only a tag push and a workflow_dispatch given a tag reach the
+# upload step, and both bundle the WAD.
 python3 - "$top/.github/workflows/release-arch.yml" > "$work/cond.txt" <<'PY'
 import re, sys, yaml
 jobs = yaml.safe_load(open(sys.argv[1]))['jobs']
 cond = jobs['release']['if']
-def ev(event, ref_type, tag):
+steps = jobs['package']['steps']
+wad_cond = [s for s in steps if s.get('name') == 'Shareware DOOM1.WAD'][0]['if']
+def ev(cond, event, ref_type, tag, shareware=False):
     ctx = {'github.event_name': event, 'github.ref_type': ref_type,
-           'inputs.tag': tag}
+           'inputs.tag': tag, 'inputs.shareware': shareware}
     expr = re.sub(r"[a-z_]+\.[a-z_]+", lambda m: repr(ctx[m.group(0)]), cond)
     expr = expr.replace('&&', ' and ').replace('||', ' or ').replace('!=', ' != ')
     return eval(expr)
+# The release job checks every package for the WAD, so whenever it runs
+# the package job must have fetched it, with the default inputs
+# (shareware=false) too.
 for name, args in [('dispatch-no-tag', ('workflow_dispatch', 'branch', '')),
                    ('dispatch-tag', ('workflow_dispatch', 'branch', 'v1.2.3')),
                    ('tag-push', ('push', 'tag', '')),
                    ('branch-push', ('push', 'branch', '')),
                    ('pull-request', ('pull_request', 'branch', ''))]:
-    print(name, ev(*args))
+    print(name, ev(cond, *args), ev(wad_cond, *args))
+print('dispatch-shareware', ev(cond, 'workflow_dispatch', 'branch', '', True),
+      ev(wad_cond, 'workflow_dispatch', 'branch', '', True))
+check = [s for s in jobs['release']['steps'] if s.get('name') == 'Check'][0]
+print('release-checks-wad', 'check-wad-in-package.sh' in check['run'])
 # A dispatch with a tag builds the game from that tag with the
 # packaging of the revision the workflow runs on: the checkout stays on
 # that revision, and the tag is passed to make-package.sh as the source.
-steps = jobs['package']['steps']
 co = [s for s in steps if s.get('uses', '').startswith('actions/checkout')][0]
 build = [s for s in steps if s.get('name') == 'Build'][0]
 version = [s for s in steps if s.get('name') == 'Version'][0]['run']
@@ -172,15 +181,17 @@ print('checkout-ref', 'ref' not in co.get('with', {})
 old = [s for s in steps if s.get('name') == 'Build an older tag']
 print('old-tag-check', bool(old) and 'refs/tags/$OLD_TAG' in old[0]['run'])
 PY
-expect="dispatch-no-tag False
-dispatch-tag True
-tag-push True
-branch-push False
-pull-request False
+expect="dispatch-no-tag False False
+dispatch-tag True True
+tag-push True True
+branch-push False False
+pull-request False False
+dispatch-shareware False True
+release-checks-wad True
 checkout-ref True
 old-tag-check True"
 if [ "$(cat "$work/cond.txt")" = "$expect" ]; then
-    pass "release job runs only for a tag push or a dispatch with a tag"
+    pass "release job runs only for a tag push or a dispatch with a tag, and both fetch the WAD"
 else
     fail "release job condition:"; cat "$work/cond.txt"
 fi

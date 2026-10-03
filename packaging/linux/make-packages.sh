@@ -196,6 +196,10 @@ install -m 0644 "$here/raylibdoom.6" "$tree/raylibdoom.6"
 if [ -n "$wad" ]; then
     install -m 0644 "$wad" "$tree/doom1.wad"
     install -m 0644 "$notice" "$tree/DOOM1-NOTICE.txt"
+    sed -i 's/^ No game data (IWAD) is included; see README\.$/ The shareware DOOM1.WAD is included, unmodified; see DOOM1-NOTICE.txt./' \
+        "$tree/THIRD-PARTY-NOTICES.txt"
+    grep -q "DOOM1.WAD is included" "$tree/THIRD-PARTY-NOTICES.txt" ||
+        { echo "could not update THIRD-PARTY-NOTICES.txt" >&2; exit 1; }
 fi
 
 tarfile=$name.tar.gz
