@@ -112,7 +112,7 @@ jobs:
           DOOM1_WAD_URL: ${{ vars.DOOM1_WAD_URL }}
         run: |
           [ -n "$DOOM1_WAD_URL" ] || unset DOOM1_WAD_URL
-          wad=$RUNNER_TEMP/DOOM1.WAD
+          wad=$RUNNER_TEMP/doom1-wad/DOOM1.WAD
           packaging/shareware/fetch-doom1-wad.sh "$wad"
           echo "path=$wad" >> "$GITHUB_OUTPUT"
 
@@ -162,13 +162,16 @@ jobs:
           pid=$!
           sleep 10
           kill $pid 2>/dev/null || true
+          sleep 2
+          kill -9 $pid 2>/dev/null || true
+          wait $pid 2>/dev/null || true
           cat "$home/Library/Logs/raylibDOOM.log"
           if [ -n "$DOOM1_WAD" ]; then
             grep -q 'Contents/Resources/DOOM1.WAD' "$home/Library/Logs/raylibDOOM.log"
           else
             grep -q 'No IWAD found' "$home/Library/Logs/raylibDOOM.log"
           fi
-          hdiutil detach "$mnt"
+          hdiutil detach "$mnt" || { sleep 5; hdiutil detach -force "$mnt"; }
 
       - uses: actions/upload-artifact@v4
         with:

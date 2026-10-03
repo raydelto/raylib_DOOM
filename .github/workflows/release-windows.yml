@@ -96,7 +96,7 @@ jobs:
           DOOM1_WAD_URL: ${{ vars.DOOM1_WAD_URL }}
         run: |
           [ -n "$DOOM1_WAD_URL" ] || unset DOOM1_WAD_URL
-          wad=$(cygpath -u "$RUNNER_TEMP")/DOOM1.WAD
+          wad=$(cygpath -u "$RUNNER_TEMP")/doom1-wad/DOOM1.WAD
           packaging/shareware/fetch-doom1-wad.sh "$wad"
           echo "path=$wad" >> "$GITHUB_OUTPUT"
 
