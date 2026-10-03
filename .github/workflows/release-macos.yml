@@ -20,7 +20,9 @@ name: release-macos
 
 on:
   push:
-    tags: ['v*']
+    # Plain release tags only. A suffixed tag such as v0.1.3-omarchy
+    # is not a valid package version and has its own release.
+    tags: ['v*', '!v*-*']
   pull_request:
     paths:
       - '.github/workflows/release-macos.yml'

@@ -196,6 +196,31 @@ else
     fail "release job condition:"; cat "$work/cond.txt"
 fi
 
+# Every release workflow runs for a plain v* tag push but not for a
+# suffixed tag (v1.2.3-omarchy), whose version the Version steps reject.
+python3 - "$top"/.github/workflows/release-*.yml > "$work/tags.txt" <<'PY'
+import fnmatch, sys, yaml
+def runs(pats, tag):
+    hit = False
+    for p in pats:  # GitHub applies the patterns in order; ! excludes
+        if p.startswith('!'):
+            hit = hit and not fnmatch.fnmatchcase(tag, p[1:])
+        else:
+            hit = hit or fnmatch.fnmatchcase(tag, p)
+    return hit
+for f in sys.argv[1:]:
+    on = yaml.safe_load(open(f))[True]  # YAML 1.1 reads the "on" key as True
+    pats = on['push']['tags']
+    print(f.rsplit('/', 1)[1], [runs(pats, t) for t in
+                                ('v1.2.3', 'v1.2.3~rc1', 'v1.2.3-omarchy')])
+PY
+if ! grep -qv 'True, True, False\]$' "$work/tags.txt" \
+   && [ "$(wc -l < "$work/tags.txt")" -eq 5 ]; then
+    pass "release workflows skip suffixed tags such as v1.2.3-omarchy"
+else
+    fail "tag filters:"; cat "$work/tags.txt"
+fi
+
 # 1. workflow_dispatch without a tag: the job is skipped (above); the
 #    script would not release for a non-dispatch event either.
 run pr pull_request branch "$draft"
