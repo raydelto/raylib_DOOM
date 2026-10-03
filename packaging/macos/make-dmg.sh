@@ -8,6 +8,11 @@
 # there, and the raylib and GLFW licenses from the raylib source
 # FetchContent put in it.
 #
+# When DOOM1_WAD names the shareware DOOM1.WAD (checked by
+# packaging/shareware/fetch-doom1-wad.sh), it is put inside the app
+# (Contents/Resources), unmodified, where the app looks last, after
+# the user's own IWADs, with DOOM1-NOTICE.txt next to the licenses.
+#
 # Signing is ad-hoc (codesign -s -) unless MACOS_SIGN_IDENTITY names a
 # Developer ID Application identity in the keychain. The app and dmg
 # are then signed with it, with the hardened runtime and a timestamp,
@@ -84,6 +89,16 @@ for dir in "$licenses" "$root"; do
     cp "$raylib/src/external/glfw/LICENSE.md" "$dir/glfw-LICENSE.md"
     cp "$here/THIRD-PARTY-NOTICES.txt" "$dir/THIRD-PARTY-NOTICES.txt"
 done
+if [ -n "${DOOM1_WAD:-}" ]; then
+    "$top/packaging/shareware/fetch-doom1-wad.sh" "$contents/Resources/DOOM1.WAD"
+    for dir in "$licenses" "$root"; do
+        cp "$top/packaging/shareware/DOOM1-NOTICE.txt" "$dir/DOOM1-NOTICE.txt"
+        sed 's/^No game data (IWAD) is included; see README\.txt\.$/The shareware DOOM1.WAD is included, unmodified; see DOOM1-NOTICE.txt./' \
+            "$here/THIRD-PARTY-NOTICES.txt" > "$dir/THIRD-PARTY-NOTICES.txt"
+        grep -q "DOOM1.WAD is included" "$dir/THIRD-PARTY-NOTICES.txt" ||
+            { echo "could not update THIRD-PARTY-NOTICES.txt" >&2; exit 1; }
+    done
+fi
 cp "$here/README.txt" "$contents/Resources/README.txt"
 cp "$here/README.txt" "$root/README.txt"
 ln -s /Applications "$root/Applications"

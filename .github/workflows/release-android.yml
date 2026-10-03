@@ -1,11 +1,14 @@
 name: release-android
 
 # A v* tag builds the signed Android APK (the flat flavor, arm64-v8a and
-# x86_64 in one APK) and uploads raylibdoom-<version>-android-flat.apk
-# and its .sha256 to the draft GitHub Release for the tag.
-# workflow_dispatch, and pull requests that change the Android build,
-# build the same release variant unsigned and keep it as an Actions
-# artifact only. Every run checks that the APK holds no WAD.
+# x86_64 in one APK) with the shareware DOOM1.WAD in it (as
+# packaging/android/build-shareware.sh does; the WAD is downloaded at
+# build time and checked by its SHA-256, never in git), and uploads
+# raylibdoom-<version>-android-shareware.apk and its .sha256 to the
+# draft GitHub Release for the tag. workflow_dispatch, and pull
+# requests that change the Android build, build the same release
+# variant unsigned and WAD-free (checked), as an Actions artifact
+# only, unless a dispatch sets `shareware`.
 #
 # Signing needs four repository secrets (see "Android" in README.md):
 #   ANDROID_KEYSTORE_BASE64   the release keystore, base64-encoded
@@ -17,12 +20,15 @@ name: release-android
 
 on:
   push:
-    tags: ['v*']
+    # Plain release tags only. A suffixed tag such as v0.1.3-omarchy
+    # is not a valid package version and has its own release.
+    tags: ['v*', '!v*-*']
   pull_request:
     paths:
       - '.github/workflows/release-android.yml'
       - 'android/**'
       - 'packaging/android/**'
+      - 'packaging/shareware/**'
       - 'linuxdoom-1.10/i_android.*'
   workflow_dispatch:
     inputs:
@@ -30,6 +36,13 @@ on:
         description: 'APK version, MAJOR.MINOR.PATCH (default: 0.0.0)'
         required: false
         default: ''
+      shareware:
+        description: >-
+          Bundle the shareware DOOM1.WAD, as a tag does (the artifact
+          then holds it)
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -103,28 +116,47 @@ jobs:
           printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$ks"
           echo "path=$ks" >> "$GITHUB_OUTPUT"
 
+      # A tag's packages ship the shareware DOOM1.WAD; everything else
+      # stays WAD-free unless a dispatch asks for it. The WAD is
+      # downloaded outside the checkout and must match its SHA-256.
+      - name: Shareware DOOM1.WAD
+        id: wad
+        if: (github.event_name == 'push' && github.ref_type == 'tag') || inputs.shareware
+        env:
+          DOOM1_WAD_URL: ${{ vars.DOOM1_WAD_URL }}
+        run: |
+          [ -n "$DOOM1_WAD_URL" ] || unset DOOM1_WAD_URL
+          wad=$RUNNER_TEMP/doom1-wad/DOOM1.WAD
+          packaging/shareware/fetch-doom1-wad.sh "$wad"
+          echo "path=$wad" >> "$GITHUB_OUTPUT"
+
       - name: Build
         working-directory: android
         env:
           VERSION: ${{ steps.version.outputs.version }}
           KEYSTORE: ${{ steps.keystore.outputs.path }}
+          DOOM1_WAD: ${{ steps.wad.outputs.path }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           set -- -PappVersion="$VERSION"
           [ -z "$KEYSTORE" ] || set -- "$@" -PreleaseKeystore="$KEYSTORE"
+          [ -z "$DOOM1_WAD" ] || set -- "$@" -PbundleWad="$DOOM1_WAD"
           ./gradlew --no-daemon assembleFlatRelease "$@"
 
       - name: Package
         env:
           VERSION: ${{ steps.version.outputs.version }}
           SIGNED: ${{ steps.keystore.outputs.path != '' }}
+          DOOM1_WAD: ${{ steps.wad.outputs.path }}
         run: |
           out=android/app/build/outputs/apk/flat/release
           mkdir dist
+          variant=flat
+          [ -z "$DOOM1_WAD" ] || variant=shareware
           if [ "$SIGNED" = true ]; then
-            apk=dist/raylibdoom-$VERSION-android-flat.apk
+            apk=dist/raylibdoom-$VERSION-android-$variant.apk
             cp "$out/app-flat-release.apk" "$apk"
             apksigner=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)/apksigner
             "$apksigner" verify --print-certs "$apk" | tee certs.txt
@@ -133,10 +165,16 @@ jobs:
               exit 1
             fi
           else
-            apk=dist/raylibdoom-$VERSION-android-flat-unsigned.apk
+            apk=dist/raylibdoom-$VERSION-android-$variant-unsigned.apk
             cp "$out/app-flat-release-unsigned.apk" "$apk"
           fi
-          sh packaging/android/check-no-wad.sh "$apk"
+          if [ -n "$DOOM1_WAD" ]; then
+            sh packaging/shareware/check-wad-in-package.sh "$apk"
+            unzip -p "$apk" assets/licenses/THIRD-PARTY-NOTICES.txt |
+              grep -q 'Not affiliated with id Software'
+          else
+            sh packaging/android/check-no-wad.sh "$apk"
+          fi
           (cd dist && sha256sum "$(basename "$apk")" > "$(basename "$apk").sha256" &&
              cat ./*.sha256)
 
@@ -169,8 +207,8 @@ jobs:
         working-directory: dist
         run: |
           sha256sum -c ./*.sha256
-          sh ../packaging/android/check-no-wad.sh ./*.apk
-          ls ./*.apk | grep -q -- '-android-flat\.apk$'
+          sh ../packaging/shareware/check-wad-in-package.sh ./*.apk
+          ls ./*.apk | grep -q -- '-android-shareware\.apk$'
 
       - name: Upload to the draft release
         env:

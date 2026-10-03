@@ -44,6 +44,9 @@ Inside `raylibDOOM.app` the game looks for its IWAD in `$DOOMWADDIR`,
 `~/Library/Application Support/raylibDOOM` and the folder holding the
 app, saves games to that Application Support folder, and logs to
 `~/Library/Logs/raylibDOOM.log`; see `packaging/macos/README.txt`.
+The release app also holds the shareware `DOOM1.WAD` in
+`Contents/Resources`, looked in last (see "Shareware DOOM1.WAD in the
+release packages" below).
 
 ### Windows
 
@@ -51,7 +54,8 @@ The Windows x64 release, `raylibdoom-<version>-windows-x64.zip`, is a
 portable folder with a single statically linked `raylibdoom.exe`, built
 by `.github/workflows/release-windows.yml` with
 `packaging/windows/make-package.sh`. On Windows the game looks for
-IWADs next to `raylibdoom.exe` when `DOOMWADDIR` is not set. Started
+IWADs next to `raylibdoom.exe` when `DOOMWADDIR` is not set; the
+release zip has the shareware `DOOM1.WAD` there. Started
 from Explorer, it hides its console window, keeps savegames next to
 the executable, and shows fatal errors in a message box.
 
@@ -81,8 +85,10 @@ architectures to the draft release; running the workflow by hand keeps
 them as an Actions artifact, and can also build an existing tag's
 source (the `tag` input) as an artifact only, without touching that
 tag's release. `sudo apt install ./raylibdoom_*.deb` installs
-`/usr/games/raylibdoom` with a menu entry; `sudo apt install freedoom`
-adds free IWADs it finds.
+`/usr/games/raylibdoom` with a menu entry, and the release packages'
+shareware DOOM1.WAD in `/usr/share/raylibdoom` (next to the binary in
+the `.tar.gz`); `sudo apt install freedoom` adds free IWADs it finds
+and prefers over the shareware one.
 
 ### Arch Linux and Omarchy
 
@@ -95,11 +101,38 @@ unless it is given the tag of an existing draft release, which it then
 builds and adds the package to. Install it with
 `sudo pacman -U raylibdoom-*.pkg.tar.zst`: it puts `/usr/bin/raylibdoom`
 in the app launcher, and the game finds IWADs copied to
-`/usr/share/games/doom`. `sudo pacman -R raylibdoom` removes it. As
+`/usr/share/games/doom` (the release package's shareware DOOM1.WAD
+is in `/usr/share/raylibdoom`). `sudo pacman -R raylibdoom` removes it. As
 committed, the PKGBUILD builds the release tarball of its `pkgver` and
 can go to the AUR. The Ubuntu `raylibdoom-<version>-linux-x86_64.tar.gz`
 runs on Omarchy too, unpacked anywhere, and is the fallback for other
 distributions.
+
+### Shareware DOOM1.WAD in the release packages
+
+Every package a `v*` tag releases (Windows zip, Ubuntu `.deb` and
+`.tar.gz`, Arch package, macOS dmg, Android APK) includes the free
+shareware `DOOM1.WAD` (DOOM 1.9, episode 1), unmodified, so it plays
+right after install, with `packaging/shareware/DOOM1-NOTICE.txt`
+("DOOM shareware © id Software. Not affiliated with id Software /
+ZeniMax / Microsoft.", the GPL notice and a link to the source). The
+WAD is never in git: each release workflow downloads it at build time
+with `packaging/shareware/fetch-doom1-wad.sh`, which fails the job
+unless it is 4,196,020 bytes with SHA-256
+`1d7d43be501e67d927e415e0b8f3e29c3bf33075e859721816f652a526cac771`
+(the URL can be overridden with the `DOOM1_WAD_URL` repository
+variable), and `packaging/shareware/check-wad-in-package.sh` checks
+every package for it before uploading. Pull requests, the `build`
+workflow and manual runs stay WAD-free; a manual run with the
+`shareware` input builds the release packages with the WAD as an
+artifact, to try them before tagging.
+
+The bundled WAD is the game's last choice: on Linux it is looked for
+after `$DOOMWADDIR`, the current directory, `-file` and
+`/usr/share/games/doom`; on macOS after `$DOOMWADDIR`, Application
+Support and the app's folder; `-iwad FILE` always wins. On Windows it
+sits next to `raylibdoom.exe`, where `doom.wad` or `doom2.wad` win over
+it, and `-iwad` or `DOOMWADDIR` pick any other IWAD.
 
 On Hyprland the game runs through XWayland. The window tiles like any
 other; to float it at its own size instead, add a window rule for the
@@ -196,7 +229,9 @@ identified from the maps it contains:
 An IWAD passed with `-file` (`-file DOOM1.WAD`) is also used as the IWAD.
 On Linux, the game then looks in `/usr/local/share/games/doom` and
 `/usr/share/games/doom`, where distribution packages such as `freedoom`
-install IWADs. If no IWAD is found, the game says where it looked and
+install IWADs, and last next to the executable and in its
+`../share/raylibdoom`, where the release packages put the shareware
+`DOOM1.WAD`. If no IWAD is found, the game says where it looked and
 exits.
 
 | Option               | Effect                                    |
@@ -438,15 +473,16 @@ adb shell run-as com.raylib.doom cp /data/local/tmp/args.txt files/
 ### Release APK
 
 On a `v*` tag, `.github/workflows/release-android.yml` builds
-`raylibdoom-<version>-android-flat.apk` (the `flat` flavor,
-`arm64-v8a` and `x86_64` in one APK) with its `.sha256`, checks it has
-no WAD, and uploads both to the tag's draft release, adding the
+`raylibdoom-<version>-android-shareware.apk` (the `flat` flavor,
+`arm64-v8a` and `x86_64` in one APK, with the shareware DOOM1.WAD as
+below) with its `.sha256`, checks the WAD in it, and uploads both to
+the tag's draft release, adding the
 Android section of the release notes
 (`packaging/android/RELEASE-NOTES.md`). `versionName` is the tag
 without the `v` and `versionCode` is `major*1000000 + minor*1000 +
 patch` (`-PappVersion=1.2.3`). Pull requests that touch the Android
-build, and a manual run, build the same release APK unsigned as an
-artifact. The `xr` flavor is not released: it is for headsets and
+build, and a manual run, build the same release APK unsigned and
+WAD-free (checked with `check-no-wad.sh`) as an artifact. The `xr` flavor is not released: it is for headsets and
 glasses, and its OpenXR loader adds another component to ship; it
 stays a CI artifact.
 
@@ -477,20 +513,21 @@ allowing their browser or file manager to install unknown apps.
 
 ### Shareware APK (DOOM1.WAD included)
 
-One APK, put on a release by hand, includes the shareware `DOOM1.WAD`
-(episode 1), unmodified, as `assets/doom1.wad`: `-PbundleWad=FILE`
-adds it, after checking its SHA-256 and that the file is outside the
-checkout, so it can never be committed. Builds without the property,
-CI and `release-android.yml` among them, stay WAD-free. The launcher
+The release APK includes the shareware `DOOM1.WAD` (episode 1),
+unmodified, as `assets/doom1.wad`: `-PbundleWad=FILE` adds it, after
+checking its SHA-256 and that the file is outside the checkout, so it
+can never be committed. Builds without the property, CI and pull
+requests among them, stay WAD-free. The launcher
 unpacks it and chooses it when nothing else is chosen; a fresh install
 goes straight into the game. Other IWADs and PWADs are added as above,
 and the launcher shows "DOOM shareware © id Software. Not affiliated
 with id Software / ZeniMax / Microsoft." To build, sign and name it
-(`raylibdoom-<version>-android-shareware.apk` and its `.sha256`):
+locally (`raylibdoom-<version>-android-shareware.apk` and its
+`.sha256`), as the release workflow does:
 
 ```sh
 ANDROID_KEYSTORE_PASSWORD=... ANDROID_KEY_ALIAS=... ANDROID_KEY_PASSWORD=... \
-packaging/android/build-shareware.sh 0.1.1 /path/to/DOOM1.WAD \
+packaging/android/build-shareware.sh 0.1.3 /path/to/DOOM1.WAD \
     /path/to/raylibdoom-release.jks out/
 ```
 

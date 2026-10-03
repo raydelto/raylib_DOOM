@@ -6,14 +6,21 @@ name: release-linux
 # Actions artifact only. workflow_dispatch can also build an existing
 # tag's source (input `tag`) as an artifact only, to try out packaging
 # changes against a tag that is already released.
+#
+# A tag's packages ship the shareware DOOM1.WAD (downloaded at build
+# time and checked by its SHA-256; never in git). Pull requests and
+# dispatches stay WAD-free, unless a dispatch sets `shareware`.
 
 on:
   push:
-    tags: ['v*']
+    # Plain release tags only. A suffixed tag such as v0.1.3-omarchy
+    # is not a valid package version and has its own release.
+    tags: ['v*', '!v*-*']
   pull_request:
     paths:
       - '.github/workflows/release-linux.yml'
       - 'packaging/linux/**'
+      - 'packaging/shareware/**'
   workflow_dispatch:
     inputs:
       version:
@@ -26,6 +33,13 @@ on:
           packaging. Artifact only: never uploaded to a release.
         required: false
         default: ''
+      shareware:
+        description: >-
+          Bundle the shareware DOOM1.WAD, as a tag does (the artifact
+          then holds it)
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -120,10 +134,27 @@ jobs:
       - name: Build
         run: cmake --build build -j
 
+      # A tag's packages ship the shareware DOOM1.WAD; everything else
+      # stays WAD-free unless a dispatch asks for it. The WAD is
+      # downloaded outside the checkout and must match its SHA-256.
+      - name: Shareware DOOM1.WAD
+        id: wad
+        if: (github.event_name == 'push' && github.ref_type == 'tag') || inputs.shareware
+        env:
+          DOOM1_WAD_URL: ${{ vars.DOOM1_WAD_URL }}
+        run: |
+          [ -n "$DOOM1_WAD_URL" ] || unset DOOM1_WAD_URL
+          wad=$RUNNER_TEMP/doom1-wad/DOOM1.WAD
+          packaging/shareware/fetch-doom1-wad.sh "$wad"
+          echo "path=$wad" >> "$GITHUB_OUTPUT"
+
       - name: Package
         env:
           VERSION: ${{ steps.version.outputs.version }}
-        run: packaging/linux/make-packages.sh "$VERSION" build dist
+          DOOM1_WAD: ${{ steps.wad.outputs.path }}
+        run: |
+          packaging/linux/make-packages.sh "$VERSION" build dist
+          [ -z "$DOOM1_WAD" ] || packaging/shareware/check-wad-in-package.sh dist/*.deb dist/*.tar.gz
 
       - name: Check
         run: |
@@ -184,6 +215,12 @@ jobs:
           pattern: raylibdoom-${{ needs.package.outputs.version }}-linux-*
           merge-multiple: true
           path: dist
+
+      - name: Check
+        working-directory: dist
+        run: |
+          sha256sum -c ./*.sha256
+          sh ../packaging/shareware/check-wad-in-package.sh ./*.deb ./*.tar.gz
 
       - name: Upload to the draft release
         env:

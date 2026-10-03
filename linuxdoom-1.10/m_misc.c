@@ -247,9 +247,18 @@ default_t	defaults[] =
     {"key_strafeleft",&key_strafeleft, ','},
     {"key_straferight",&key_straferight, '.'},
 
+#ifdef __APPLE__
+    // Ctrl+arrows and Alt+arrows are system shortcuts on macOS
+    // (switching Spaces), so fire and strafe default to Z and X.
+    // Still remappable in the config file.
+    {"key_fire",&key_fire, 'z'},
+    {"key_use",&key_use, ' '},
+    {"key_strafe",&key_strafe, 'x'},
+#else
     {"key_fire",&key_fire, KEY_RCTRL},
     {"key_use",&key_use, ' '},
     {"key_strafe",&key_strafe, KEY_RALT},
+#endif
     {"key_speed",&key_speed, KEY_RSHIFT},
 
 // UNIX hack, to be removed. 

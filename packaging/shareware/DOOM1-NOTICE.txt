@@ -1,0 +1,23 @@
+DOOM1.WAD
+=========
+
+This package includes DOOM1.WAD, the shareware episode of DOOM 1.9
+(Knee-Deep in the Dead), unmodified:
+
+  4,196,020 bytes, SHA-256
+  1d7d43be501e67d927e415e0b8f3e29c3bf33075e859721816f652a526cac771
+
+DOOM shareware (c) id Software. Not affiliated with id Software /
+ZeniMax / Microsoft.
+
+DOOM1.WAD is game data, not part of raylib DOOM. It is not covered by
+the GNU General Public License or by the other licenses in this
+package. The shareware episode may be shared freely, but only as the
+unmodified file.
+
+raylib DOOM itself, the program, is free software under the GNU
+General Public License version 2 (LICENSE.TXT). Its source code is at
+https://github.com/raydelto/raylib_DOOM
+
+Your own IWAD (doom.wad, doom2.wad, Freedoom, ...) is used instead of
+DOOM1.WAD when the game finds one: see README.txt.

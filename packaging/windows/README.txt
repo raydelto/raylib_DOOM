@@ -11,7 +11,10 @@ and 11.
 Game data
 ---------
 
-No game data is included. DOOM needs an IWAD, which is one of:
+The release zip includes the free shareware DOOM1.WAD (episode 1,
+unmodified; see DOOM1-NOTICE.txt) next to raylibdoom.exe, so you can
+double-click raylibdoom.exe and play. Zips built from the source
+without it include no game data. DOOM needs an IWAD, which is one of:
 
   doom1.wad      the shareware episode, free to share
   doom.wad       registered DOOM, doomu.wad for The Ultimate DOOM
@@ -27,6 +30,11 @@ To keep your WADs somewhere else, set the DOOMWADDIR environment
 variable to their folder, or name the IWAD on the command line:
 
   raylibdoom.exe -iwad C:\wads\freedoom2.wad
+
+In one folder the game takes the first of the names above, so
+doom.wad or doom2.wad next to raylibdoom.exe wins over DOOM1.WAD. To
+play Freedoom, or any IWAD, instead of the shareware DOOM1.WAD, name it
+with -iwad, set DOOMWADDIR to its folder, or delete DOOM1.WAD.
 
 If no IWAD is found the game says where it looked and exits.
 
