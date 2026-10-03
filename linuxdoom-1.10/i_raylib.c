@@ -382,6 +382,19 @@ static void SetKeyState (int key, int down)
     doomkey = TranslateKey (key);
     if (doomkey)
 	PostEvent (down ? rl_keydown : rl_keyup, doomkey, 0, 0);
+
+#ifdef __APPLE__
+    // Ctrl+Left/Right is the Spaces shortcut on macOS and switches
+    // away from the game before it sees the key. Z also acts as
+    // Ctrl (fire) and X as Alt (strafe). The letter itself is still
+    // sent so typing text keeps working.
+    if (key == KEY_Z)
+	PostEvent (down ? rl_keydown : rl_keyup,
+		   TranslateKey (KEY_LEFT_CONTROL), 0, 0);
+    else if (key == KEY_X)
+	PostEvent (down ? rl_keydown : rl_keyup,
+		   TranslateKey (KEY_RIGHT_ALT), 0, 0);
+#endif
 }
 
 

@@ -494,6 +494,14 @@ packaging/android/build-shareware.sh 0.1.1 /path/to/DOOM1.WAD \
     /path/to/raylibdoom-release.jks out/
 ```
 
+### macOS: Ctrl and Alt
+
+On macOS, Ctrl+Left/Right arrow is the system shortcut that switches
+Spaces, so it pulls the player out of the game. An app can't block it
+without an event tap and Accessibility permission, so **Z** also acts
+as Ctrl (fire) and **X** as Alt (strafe). The real Ctrl and Alt keys
+still work. Other platforms are unchanged.
+
 ### Controls and Android XR
 
 A Bluetooth or USB gamepad plays with the controller mapping of the
