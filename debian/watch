@@ -1,7 +1,6 @@
-Version: 5
-
-Template: Github
-Owner: raydelto
-Project: raylib_DOOM
-Repacksuffix: +ds
-Dversion-mangle: auto
+version=4
+# Release tags are vX.Y.Z. Others on GitHub (untagged-*, v0.1.3-omarchy,
+# v0.1.3-windows) are not source releases.
+opts="repack,repacksuffix=+ds,compression=xz,dversionmangle=s/\+ds\d*$//,filenamemangle=s%.*/v?@ANY_VERSION@(@ARCHIVE_EXT@)%@PACKAGE@-$1$2%" \
+  https://github.com/raydelto/raylib_DOOM/tags \
+  .*/archive/refs/tags/v?(\d+\.\d+\.\d+)@ARCHIVE_EXT@
