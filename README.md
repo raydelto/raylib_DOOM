@@ -295,6 +295,16 @@ par times, the next and secret levels, and the end text and picture:
 These WADs replace the IWAD's texture list, so Freedoom's own episodes
 may not load while one is added.
 
+The text parts of `DEHACKED` lumps are applied too: the BEX
+`[STRINGS]` map names (`HUSTR_E3M1`, ...) and finale texts, and the
+`[PARS]` par times. That is how `SIGIL_COMPAT_V1_23.wad`, which puts
+SIGIL in E3 for engines without E5, names its maps, and how Freedoom
+names its own. Things, frames and code pointers are not changed.
+Load either `SIGIL_V1_23.wad` (E5) or `SIGIL_COMPAT_V1_23.wad` (E3),
+not both: together the menu shows two "SIGIL" episodes, and the one
+loaded last replaces the other's texture list, so with COMPAT last
+E5's `SKY5` sky is gone.
+
 Only part of UMAPINFO is supported (see the top of
 `linuxdoom-1.10/u_mapinfo.c`). `NoIntermission` is ignored, `EndCast`
 ends the game without the cast, `InterText` shows only on a level that

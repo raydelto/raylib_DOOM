@@ -52,6 +52,7 @@ static const char rcsid[] = "$Id: d_main.c,v 1.8 1997/02/03 22:45:09 b1 Exp $";
 
 #include "z_zone.h"
 #include "w_wad.h"
+#include "u_dehacked.h"
 #include "m_swap.h"
 #include "s_sound.h"
 #include "v_video.h"
@@ -1106,6 +1107,98 @@ static void D_LoadMapInfo (void)
 
 
 //
+// D_LoadDehacked
+// Applies the text parts of every DEHACKED lump, in load order:
+// level names, finale texts and par times. SIGIL_COMPAT names its
+// E3 maps this way; without it they show the IWAD's E3 names.
+//
+extern char*	mapnames[];
+extern char*	mapnames2[];
+extern char*	mapnamesp[];
+extern char*	mapnamest[];
+extern char*	e1text, *e2text, *e3text, *e4text;
+extern char*	c1text, *c2text, *c3text, *c4text, *c5text, *c6text;
+extern char*	p1text, *p2text, *p3text, *p4text, *p5text, *p6text;
+extern char*	t1text, *t2text, *t3text, *t4text, *t5text, *t6text;
+extern int	pars[4][10];
+extern int	cpars[32];
+
+static int D_SetPar (int episode, int map, int seconds)
+{
+    if (episode == 0 && map >= 1 && map <= 32)
+	cpars[map-1] = seconds;
+    else if (episode >= 1 && episode <= 3 && map >= 1 && map <= 9)
+	pars[episode][map] = seconds;
+    else
+	return false;
+    return true;
+}
+
+#define NUMDEHSTRINGS	(4*9 + 3*32 + 22)
+
+static void D_LoadDehacked (void)
+{
+    static char		names[NUMDEHSTRINGS][16];
+    static dehstring_t	strings[NUMDEHSTRINGS];
+    static char**	texts[] =
+    {
+	&e1text, &e2text, &e3text, &e4text,
+	&c1text, &c2text, &c3text, &c4text, &c5text, &c6text,
+	&p1text, &p2text, &p3text, &p4text, &p5text, &p6text,
+	&t1text, &t2text, &t3text, &t4text, &t5text, &t6text
+    };
+    dehcount_t		count = { 0, 0 };
+    int			n = 0;
+    int			found = 0;
+    int			i;
+
+    for (i=0 ; i<4*9 ; i++, n++)
+    {
+	snprintf (names[n], sizeof(names[n]), "HUSTR_E%dM%d", i/9+1, i%9+1);
+	strings[n].text = &mapnames[i];
+    }
+    for (i=0 ; i<32 ; i++, n++)
+    {
+	snprintf (names[n], sizeof(names[n]), "HUSTR_%d", i+1);
+	strings[n].text = &mapnames2[i];
+    }
+    for (i=0 ; i<32 ; i++, n++)
+    {
+	snprintf (names[n], sizeof(names[n]), "PHUSTR_%d", i+1);
+	strings[n].text = &mapnamesp[i];
+    }
+    for (i=0 ; i<32 ; i++, n++)
+    {
+	snprintf (names[n], sizeof(names[n]), "THUSTR_%d", i+1);
+	strings[n].text = &mapnamest[i];
+    }
+    // E1TEXT..E4TEXT, then C, P and T 1..6.
+    for (i=0 ; i<22 ; i++, n++)
+    {
+	int	letter = i < 4 ? 'E' : "CPT"[(i-4)/6];
+	int	number = i < 4 ? i+1 : (i-4)%6+1;
+
+	snprintf (names[n], sizeof(names[n]), "%c%dTEXT", letter, number);
+	strings[n].text = texts[i];
+    }
+    for (i=0 ; i<n ; i++)
+	strings[i].name = names[i];
+
+    for (i=0 ; i<numlumps ; i++)
+    {
+	if (strncasecmp (lumpinfo[i].name, "DEHACKED", 8))
+	    continue;
+	U_ParseDehacked (W_CacheLumpNum (i, PU_CACHE), W_LumpLength (i),
+			 strings, n, D_SetPar, &count);
+	found++;
+    }
+    if (found)
+	printf ("U_ParseDehacked: %d DEHACKED lump(s), %d string(s) and "
+		"%d par time(s) applied.\n", found, count.strings, count.pars);
+}
+
+
+//
 // D_DoomMain
 //
 void D_DoomMain (void)
@@ -1371,6 +1464,7 @@ void D_DoomMain (void)
     }
     
     D_LoadMapInfo ();
+    D_LoadDehacked ();
 
     // Iff additonal PWAD files are used, print modified banner
     if (modifiedgame)

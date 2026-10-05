@@ -76,7 +76,7 @@ set(DOOM_SOURCES
   p_spec.c p_switch.c p_telept.c p_tick.c p_user.c
   r_bsp.c r_data.c r_draw.c r_main.c r_plane.c r_segs.c r_sky.c r_things.c
   s_sound.c sounds.c st_lib.c st_stuff.c tables.c v_video.c w_wad.c
-  u_mapinfo.c wi_stuff.c z_zone.c
+  u_dehacked.c u_mapinfo.c wi_stuff.c z_zone.c
   opl3.c)
 list(TRANSFORM DOOM_SOURCES PREPEND ${DOOM_DIR}/)
 
@@ -177,6 +177,15 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang" AND NOT WIN32
   target_link_options(midi_register_test PRIVATE -fsanitize=undefined)
 endif()
 add_test(NAME midi_register COMMAND midi_register_test)
+
+add_executable(dehacked_test tests/dehacked_test.c ${DOOM_DIR}/u_dehacked.c)
+target_include_directories(dehacked_test PRIVATE ${DOOM_DIR})
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang" AND NOT WIN32)
+  target_compile_options(dehacked_test PRIVATE
+    -fsanitize=address,undefined -fno-sanitize-recover=undefined)
+  target_link_options(dehacked_test PRIVATE -fsanitize=address,undefined)
+endif()
+add_test(NAME dehacked COMMAND dehacked_test)
 
 add_executable(umapinfo_test tests/umapinfo_test.c ${DOOM_DIR}/u_mapinfo.c)
 target_include_directories(umapinfo_test PRIVATE ${DOOM_DIR})
