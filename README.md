@@ -1,5 +1,7 @@
 # raylib DOOM
 
+![Screenshot](raylib_DOOM.png "raylib DOOM screenshot")
+
 The 1997 Linux DOOM source release (`linuxdoom-1.10`), ported from X11 and
 `/dev/dsp` to [raylib](https://www.raylib.com/) and made to run on 64-bit
 systems. The original release notes are in [README.TXT](README.TXT).
@@ -8,6 +10,20 @@ The software renderer is untouched: it still draws 8-bit paletted pixels
 into a 320x200 buffer. raylib opens the window, shows that buffer scaled
 to 4:3, reads the keyboard and mouse, and plays the sound effects and
 music.
+
+## Releases
+
+We have [releases](http://www.github.com/raydelto/raylib_doom/releases) ready to play, for the following platforms:
+
+1. Windows
+1. MacOS (Intel and Apple Sillicon)
+1. Linux (Omarchy and Ubuntu)
+1. Android
+1. Web (You can go play now the web version on https://www.raydelto.org/doom 
+
+We have tested on iOS as a local build, we currently don't provide a iOS release but you can build it yourself.
+
+We have also confirmed that it works well on AndroidXR and Meta Quest 3.
 
 ## Building
 
